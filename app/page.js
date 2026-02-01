@@ -30,15 +30,15 @@ export default function Page() {
   const [email, setEmail] = useState(""); 
   const [password, setPassword] = useState(""); 
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSesion(session);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSesion(session);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+                              useEffect(() => {
+                                supabase.auth.getSession().then(({ data: { session } }) => {
+                                  setSesion(session);
+                                });
+                                const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+                                  setSesion(session);
+                                });
+                                return () => subscription.unsubscribe();
+                              }, []);
 
   async function iniciarSesion(e) {
     e.preventDefault();
@@ -66,24 +66,24 @@ export default function Page() {
     }
   }
 
-  useEffect(() => {
-    if (!sesion) return; 
-    obtenerDatos();
-    obtenerIngresos();
+                                    useEffect(() => {
+                                      if (!sesion) return; 
+                                      obtenerDatos();
+                                      obtenerIngresos();
 
-    const canalUnidades = supabase.channel('cambios-unidades')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'unidades' }, () => obtenerDatos())
-      .subscribe();
+                                      const canalUnidades = supabase.channel('cambios-unidades')
+                                        .on('postgres_changes', { event: '*', schema: 'public', table: 'unidades' }, () => obtenerDatos())
+                                        .subscribe();
 
-    const canalIngresos = supabase.channel('cambios-ingresos')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'ingresos' }, () => obtenerIngresos())
-      .subscribe();
+                                      const canalIngresos = supabase.channel('cambios-ingresos')
+                                        .on('postgres_changes', { event: '*', schema: 'public', table: 'ingresos' }, () => obtenerIngresos())
+                                        .subscribe();
 
-    return () => {
-      supabase.removeChannel(canalUnidades);
-      supabase.removeChannel(canalIngresos);
-    };
-  }, [sesion]);
+                                      return () => {
+                                        supabase.removeChannel(canalUnidades);
+                                        supabase.removeChannel(canalIngresos);
+                                      };
+                                    }, [sesion]);
 
   async function agregarUnidad() {
     if (!nuevoCamion) return;
