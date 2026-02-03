@@ -8,6 +8,7 @@ const UNITS = ['Unidad 1', 'Unidad 2', 'Unidad 3', 'Unidad 4', 'Unidad 5'];
 const CATEGORIES = ['Combustible', 'Mantenimiento', 'Casetas', 'Gestión Especial'];
 
 export default function FinancePage() {
+  //Arreglo Deconstructuración - Un mismo arreglo con objeto para todo. SSOT
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     description: '',
@@ -16,20 +17,28 @@ export default function FinancePage() {
     amount: '',
   });
 
-  // Limpiamos el tipado de TypeScript para que funcione en .js
+  //Feedback loop infinito de actualización de nombre y valor
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
+  //Verifica que todo esé ok para subirlo a Supabase,
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.description.trim() || !formData.amount) {
       alert('Por favor completa todos los campos');
       return;
     }
-    console.log("Datos para Supabase:", formData);
+    console.log("Datos para Supabase:", formData); //Modo de prueba, aun no se manda
     alert("Gasto registrado en interfaz. ¡Listo para conexión final!");
+
+    setFormData({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    amount: '',
+    unit: UNITS[0],     // Regresa a la primera unidad de tu lista
+    category: CATEGORIES[0]});// Regresa a la primera categoría
   };
 
   return (
@@ -61,7 +70,7 @@ export default function FinancePage() {
                   name="amount"
                   type="number"
                   placeholder="0.00"
-                  value={formData.amount}
+                  value={formData.amount || ""}
                   onChange={handleChange}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white"
                 />
@@ -72,7 +81,7 @@ export default function FinancePage() {
                 <input
                   name="date"
                   type="date"
-                  value={formData.date}
+                  value={formData.date || ""}
                   onChange={handleChange}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white"
                 />
@@ -83,7 +92,7 @@ export default function FinancePage() {
                 <div className="relative">
                   <select
                     name="unit"
-                    value={formData.unit}
+                    value={formData.unit || ""}
                     onChange={handleChange}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 appearance-none text-white"
                   >
@@ -97,21 +106,20 @@ export default function FinancePage() {
                 <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Categoría</label>
                 <select
                   name="category"
-                  value={formData.category}
+                  value={formData.category || ""}
                   onChange={handleChange}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 outline-none focus:ring-2 focus:ring-blue-500 text-white"
                 >
                   {CATEGORIES.map((c) => <option key={c} value={c} className="bg-slate-900">{c}</option>)}
                 </select>
-              </div>
-
+              </div>          
               <div className="md:col-span-2 space-y-2">
                 <label className="text-xs font-medium text-slate-400 uppercase tracking-wider">Descripción</label>
                 <div className="relative">
                   <input
                     name="description"
                     placeholder="Ej: Diésel carga Monterrey-Laredo"
-                    value={formData.description}
+                    value={formData.description || ""}
                     onChange={handleChange}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 pl-10 outline-none focus:ring-2 focus:ring-blue-500 text-white"
                   />
