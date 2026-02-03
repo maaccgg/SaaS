@@ -60,7 +60,7 @@ export default function FinancePage() {
           <section className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 mb-8 backdrop-blur-sm shadow-2xl">
             <div className="flex items-center gap-2 mb-6">
               <Wallet className="text-blue-500" size={20} />
-              <h3 className="text-lg font-semibold">Registrar Nuevo Gasto</h3>
+              <h3 className="text-lg font-semibold">Registrar Nuevo Gastos</h3>
             </div>
 
             <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-6">
