@@ -24,7 +24,7 @@ export default function Sidebar() {
 
       <Link href="/Finanzas" className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-600/10 hover:text-blue-400 transition-all group">
         <img src="/icons/Ingresos.png" className="w-5 h-5 opacity-70 group-hover:opacity-100" alt="" />
-        <span className="font-medium">Ingresos</span>
+        <span className="font-medium">Finanzas</span>
       </Link>
 
       <Link href="/Operadores" className="flex items-center gap-3 p-3 rounded-xl hover:bg-blue-600/10 hover:text-blue-400 transition-all group">
