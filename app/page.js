@@ -130,7 +130,6 @@ export default function Page() {
 
   return (
     <div className="flex bg-slate-950 text-slate-50 min-h-screen">
-      <Sidebar />
       <main className="flex-1 p-8">
         <div className="max-w-5xl mx-auto">
           <header className="mb-10 flex justify-between items-center">
