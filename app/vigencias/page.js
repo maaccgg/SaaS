@@ -1,87 +1,131 @@
 "use client";
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
-import TarjetaDato from '@/components/tarjetaDato';
+import { ShieldAlert, FileText, Clock, AlertCircle } from 'lucide-react';
+import Sidebar from '@/components/sidebar';
 
-export default function Page() {
-  const [conteoUnidades, setConteoUnidades] = useState(0); 
-  const [totalIngresos, setTotalIngresos] = useState(0); 
+export default function VigenciasPage() {
   const [sesion, setSesion] = useState(null);
-  const [email, setEmail] = useState(""); 
-  const [password, setPassword] = useState(""); 
 
+  // 1. Blindaje de Seguridad
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => setSesion(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => setSesion(session));
-    return () => subscription.unsubscribe();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        window.location.href = "/";
+      } else {
+        setSesion(session);
+      }
+    });
   }, []);
 
-  async function iniciarSesion(e) {
-    e.preventDefault();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) alert("Acceso denegado");
-  }
-
-  async function obtenerMetricas() {
-    // 1. Contar Unidades
-    const { count } = await supabase.from('unidades').select('*', { count: 'exact', head: true });
-    setConteoUnidades(count || 0);
-
-    // 2. Sumar Ingresos
-    const { data } = await supabase.from('facturas').select('monto_total');
-    if (data) {
-      const suma = data.reduce((acc, curr) => acc + (Number(curr.monto_total) || 0), 0);
-      setTotalIngresos(suma);
+  // DATOS SIMULADOS PARA EL IMPACTO DE LA DEMO
+  const unidadesDemo = [
+    { 
+      id: 1, 
+      nombre: "TRACTO #204 - KENWORTH", 
+      seguro: "2026-02-15", // Próximo a vencer
+      verificacion: "2026-08-20",
+    },
+    { 
+      id: 2, 
+      nombre: "TRACTO #102 - FREIGHTLINER", 
+      seguro: "2025-12-01", // YA VENCIDO
+      verificacion: "2026-03-10",
+    },
+    { 
+      id: 3, 
+      nombre: "TRACTO #305 - INTERNATIONAL", 
+      seguro: "2026-11-15", 
+      verificacion: "2026-12-01",
     }
-  }
+  ];
 
-  useEffect(() => {
-    if (!sesion) return; 
-    obtenerMetricas();
-
-    const canal = supabase.channel('dashboard-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'unidades' }, () => obtenerMetricas())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'facturas' }, () => obtenerMetricas())
-      .subscribe();
-
-    return () => { supabase.removeChannel(canal); };
-  }, [sesion]);
-
-  if (!sesion) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-950 text-white p-6">
-        <form onSubmit={iniciarSesion} className="bg-slate-900 p-8 rounded-2xl border border-slate-800 w-full max-w-md shadow-2xl">
-          <h2 className="text-2xl font-bold mb-6 text-blue-500 italic uppercase tracking-tighter text-center">Ingresa tu usuario</h2>
-          <input type="email" placeholder="Correo" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg mb-4 outline-none focus:border-blue-500" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" placeholder="Contraseña" className="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg mb-6 outline-none focus:border-blue-500" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button className="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold transition-all uppercase tracking-widest">Entrar</button>
-        </form>
-      </div>
-    );
-  }
+  if (!sesion) return <div className="min-h-screen bg-slate-950"></div>;
 
   return (
-    <main className="p-8">
-      <div className="max-w-5xl mx-auto">
-        <header className="mb-12 flex justify-between items-center">
-          <div>
-            <h1 className="text-4xl font-black tracking-tighter uppercase italic text-white">
-              SISTEMA <span className="text-blue-600">CENTRAL</span>
-            </h1>
-            <p className="text-slate-500 mt-2 font-bold uppercase text-[10px] tracking-[0.3em]">Institución de Logística Marco Cantu</p>
-          </div>
-          <button onClick={() => supabase.auth.signOut()} className="text-[10px] font-black bg-slate-900 hover:bg-red-950 text-slate-500 hover:text-red-400 px-4 py-2 rounded-xl border border-slate-800 transition-all uppercase tracking-widest">
-            Desconectar
-          </button>
-        </header>
+    <div className="flex bg-slate-950 min-h-screen text-slate-100">
+      <Sidebar />
 
-        {/* MÉTRICAS DE IMPACTO PARA EL PMV */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <TarjetaDato titulo="Flota Operativa" valor={conteoUnidades.toString()} color="blue" />
-          <TarjetaDato titulo="Cobranza Total" valor={`$${totalIngresos.toLocaleString()}`} color="green" />
-          <TarjetaDato titulo="Meta Consolidación" valor="$60,000" color="slate" />
+      <main className="flex-1 p-8 overflow-y-auto">
+        <div className="max-w-[1400px] mx-auto">
+          <header className="mb-12">
+            <h1 className="text-4xl font-black tracking-tighter uppercase italic leading-none">
+              CONTROL DE <span className="text-blue-600">VIGENCIAS</span>
+            </h1>
+            <p className="text-slate-500 mt-2 font-bold uppercase text-[10px] tracking-[0.3em]">
+              Módulo de Prevención Legal - Fase Consolidación
+            </p>
+          </header>
+
+          <div className="grid grid-cols-1 gap-6">
+            {unidadesDemo.map((u) => {
+              const fechaSeguro = new Date(u.seguro);
+              const hoy = new Date();
+              const esVencido = fechaSeguro < hoy;
+              const esUrgente = !esVencido && fechaSeguro < new Date(hoy.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+              return (
+                <div key={u.id} className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col lg:flex-row items-center justify-between shadow-2xl hover:border-slate-700 transition-all group">
+                  <div className="flex items-center gap-6">
+                    <div className={`p-4 rounded-2xl transition-transform group-hover:scale-110 ${
+                      esVencido ? 'bg-red-500/10 text-red-500' : 
+                      esUrgente ? 'bg-orange-500/10 text-orange-500' : 
+                      'bg-blue-500/10 text-blue-500'
+                    }`}>
+                      <ShieldAlert size={32} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black uppercase italic tracking-tighter">{u.nombre}</h3>
+                      <div className="flex gap-2 mt-2">
+                        <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-[0.15em] ${
+                          esVencido ? 'bg-red-600 text-white' : 
+                          esUrgente ? 'bg-orange-600 text-white' : 
+                          'bg-slate-800 text-slate-400'
+                        }`}>
+                          {esVencido ? 'Riesgo Crítico' : esUrgente ? 'Atención Inmediata' : 'Estatus: Operativo'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-12 mt-8 lg:mt-0">
+                    <div className="text-center">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Póliza de Seguro</p>
+                      <div className={`font-mono font-bold text-base ${
+                        esVencido ? 'text-red-500' : 
+                        esUrgente ? 'text-orange-500' : 
+                        'text-green-500'
+                      }`}>
+                        {u.seguro}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Verificación FM</p>
+                      <div className="font-mono font-bold text-base text-slate-300">
+                        {u.verificacion}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button className="mt-8 lg:mt-0 bg-slate-800 hover:bg-blue-600 px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg hover:shadow-blue-900/20">
+                    Actualizar
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* NOTA PARA EL DEMO / INSIGHT */}
+          <div className="mt-12 p-8 bg-blue-600/5 border border-blue-500/10 rounded-[2rem] flex items-center gap-6">
+            <div className="bg-blue-600/20 p-3 rounded-xl">
+              <AlertCircle className="text-blue-500" size={24} />
+            </div>
+            <p className="text-sm text-slate-400 italic leading-relaxed">
+              "Este sistema monitorea automáticamente los vencimientos para asegurar que la autoridad nunca se vea comprometida por negligencia administrativa."
+            </p>
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

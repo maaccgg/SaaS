@@ -23,8 +23,6 @@ export default function RootLayout({ children }) {
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-slate-950 text-slate-200 flex`}
       >
-        {/* Lado Izquierdo: Navegación Fija */}
-        <Sidebar />
 
         {/* Lado Derecho: Contenido Dinámico */}
         <main className="flex-1 h-screen overflow-y-auto relative bg-slate-950">
