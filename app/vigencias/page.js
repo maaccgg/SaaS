@@ -47,7 +47,7 @@ export default function VigenciasPage() {
       <Sidebar />
 
       <main className="flex-1 p-8 overflow-y-auto">
-        <div className="max-w-[1400px] mx-auto">
+        <div className="max-w-350 mx-auto">
           <header className="mb-12">
             <h1 className="text-4xl font-black tracking-tighter uppercase italic leading-none">
               CONTROL DE <span className="text-blue-600">VIGENCIAS</span>
@@ -116,7 +116,7 @@ export default function VigenciasPage() {
           </div>
 
           {/* NOTA PARA EL DEMO / INSIGHT */}
-          <div className="mt-12 p-8 bg-blue-600/5 border border-blue-500/10 rounded-[2rem] flex items-center gap-6">
+          <div className="mt-12 p-8 bg-blue-600/5 border border-blue-500/10 rounded-4xl flex items-center gap-6">
             <div className="bg-blue-600/20 p-3 rounded-xl">
               <AlertCircle className="text-blue-500" size={24} />
             </div>
