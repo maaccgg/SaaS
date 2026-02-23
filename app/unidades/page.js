@@ -1,165 +1,384 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Truck, Plus, X, RefreshCw } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient'; 
+import { supabase } from '@/lib/supabaseClient';
+import { Truck, Plus, PenTool, Trash2, X, List, Edit3, Calendar, Gauge, AlertTriangle } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 
 export default function UnidadesPage() {
+  const [sesion, setSesion] = useState(null);
   const [unidades, setUnidades] = useState([]);
-  const [showModal, setShowModal] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [sesion, setSesion] = useState(null); // Estado para blindaje
+  const [loading, setLoading] = useState(false);
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const [editandoId, setEditandoId] = useState(null);
+  
+  const [mostrarManto, setMostrarManto] = useState(false);
+  const [unidadSeleccionada, setUnidadSeleccionada] = useState(null);
+  const [mantenimientos, setMantenimientos] = useState([]);
+
+
+  const [nuevoManto, setNuevoManto] = useState({ descripcion: '', tipo: 'Preventivo', fecha: new Date().toISOString().split('T')[0], costo: '' });
+
   const [formData, setFormData] = useState({
-    nombre: '',
-    placas: '',
-    kilometraje_a: ''
+    numero_economico: '', placas: '', modelo: '', vencimiento_seguro: '', vencimiento_sct: ''
   });
 
-  // 1. VERIFICACIÓN DE SOBERANÍA (Seguridad)
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
-        window.location.href = "/"; // Redirigir a la Bóveda si no hay sesión
-      } else {
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
         setSesion(session);
-        fetchUnidades();
+        obtenerUnidades(session.user.id);
       }
-    });
+    };
+    checkSession();
   }, []);
 
-  const fetchUnidades = async () => {
-    setLoading(true);
+  
+
+  // CORRECCIÓN: Quitamos el JOIN con mantenimientos temporalmente.
+  // Ahora solo trae las unidades puras para asegurar el inventario.
+  async function obtenerUnidades(userId) {
+    console.log("Sincronizando activos para el usuario:", userId);
     const { data, error } = await supabase
       .from('unidades')
-      .select('*')
-      .order('created_at', { ascending: false });
+      .select('*') // Solo traemos la tabla de unidades
+      .eq('usuario_id', userId)
+      .order('numero_economico', { ascending: true });
 
-    if (!error) setUnidades(data);
-    setLoading(false);
+    if (error) {
+      console.error("Error al obtener datos:", error.message);
+      return;
+    }
+    setUnidades(data || []);
+  }
+
+  
+
+const abrirMantenimiento = async (unidad) => {
+  setUnidadSeleccionada(unidad);
+  setMostrarManto(true);
+  
+  // CORRECCIÓN: Agregamos 'error' a la extracción de datos
+  const { data, error } = await supabase
+    .from('mantenimientos')
+    .select('*')
+    .eq('unidad_id', unidad.id)
+    .order('fecha', { ascending: false });
+
+  if (error) {
+    console.error("Error al cargar mantenimientos:", error.message);
+    return;
+  }
+
+  setMantenimientos(data || []);
+};
+
+const agregarMantenimiento = async (e) => {
+  e.preventDefault();
+  
+  const registroParaInsertar = { 
+    descripcion: nuevoManto.descripcion,
+    tipo: nuevoManto.tipo,
+    fecha: nuevoManto.fecha,
+    costo: Number(nuevoManto.costo), // Aseguramos que sea número
+    unidad_id: unidadSeleccionada.id,
+    usuario_id: sesion.user.id 
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const { error } = await supabase
-      .from('unidades')
-      .insert([{ 
-        nombre: formData.nombre,
-        placas: formData.placas,
-        kilometraje_a: parseInt(formData.kilometraje_a) || 0,
-        estado: 'Activo'
-      }]);
+  const { error } = await supabase.from('mantenimientos').insert([registroParaInsertar]);
+  
+  if (error) {
+    alert("Error en la base de datos: " + error.message);
+  } else {
+    // Limpiamos el formulario
+    setNuevoManto({ 
+      descripcion: '', 
+      tipo: 'Preventivo', 
+      fecha: new Date().toISOString().split('T')[0], 
+      costo: 0 
+    });
+    
+    // RECARGA EL HISTORIAL INMEDIATAMENTE
+    await abrirMantenimiento(unidadSeleccionada);
+  }
+};
 
-    if (!error) {
-      setShowModal(false);
-      setFormData({ nombre: '', placas: '', kilometraje_a: '' });
-      fetchUnidades();
+  const eliminarManto = async (id) => {
+    await supabase.from('mantenimientos').delete().eq('id', id);
+    await obtenerUnidades(sesion.user.id);
+    abrirMantenimiento(unidadSeleccionada);
+  };
+
+  const abrirModalEditar = (unidad) => {
+    setEditandoId(unidad.id);
+    setFormData({
+      numero_economico: unidad.numero_economico,
+      placas: unidad.placas || '',
+      modelo: unidad.modelo || '',
+      vencimiento_seguro: unidad.vencimiento_seguro || '',
+      vencimiento_sct: unidad.vencimiento_sct || ''
+    });
+    setMostrarForm(true);
+  };
+
+  
+  const cerrarModal = () => {
+    setMostrarForm(false);
+    setEditandoId(null);
+    setFormData({ numero_economico: '', placas: '', modelo: '', vencimiento_seguro: '', vencimiento_sct: '' });
+  };
+
+  const guardarUnidad = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (editandoId) {
+        const { error } = await supabase.from('unidades').update(formData).eq('id', editandoId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('unidades').insert([
+          { ...formData, usuario_id: sesion.user.id, estatus: 'Activo' }
+        ]);
+        if (error) throw error;
+      }
+      cerrarModal();
+      await obtenerUnidades(sesion.user.id); 
+    } catch (error) {
+      alert("Fallo en la Institución: " + error.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Si no hay sesión, no renderizamos nada (mientras redirige)
+  const eliminarUnidad = async (id) => {
+    if (!confirm("¿Eliminar este activo de la Institución?")) return;
+    await supabase.from('unidades').delete().eq('id', id);
+    obtenerUnidades(sesion.user.id);
+  };
+
+  const calcularStatusVencimiento = (fecha) => {
+    if (!fecha) return { color: 'text-slate-600' };
+    const hoy = new Date();
+    const venci = new Date(fecha);
+    const dias = Math.floor((venci - hoy) / (1000 * 60 * 60 * 24));
+    if (dias < 0) return { color: 'text-red-500 font-black' };
+    if (dias < 15) return { color: 'text-orange-500 font-bold' };
+    return { color: 'text-green-500' };
+  };
+
+  // Esta función no crasheará porque si le pasamos "undefined" devuelve false tranquilamente.
+  const tieneMantoVencido = (mantos) => {
+    if (!mantos || mantos.length === 0) return false;
+    const hoy = new Date();
+    return mantos.some(m => m.fecha_sugerida && new Date(m.fecha_sugerida) <= hoy);
+  };
+
   if (!sesion) return <div className="min-h-screen bg-slate-950"></div>;
 
   return (
     <div className="flex bg-slate-950 min-h-screen text-slate-200">
-      {/* INTEGRACIÓN DEL SIDEBAR */}
       <Sidebar />
-
-      {/* CONTENIDO PRINCIPAL A LA DERECHA */}
       <main className="flex-1 p-8 overflow-y-auto">
-        <div className="max-w-1400px mx-auto">
+        <div className="max-w-7xl mx-auto">
+          
           <header className="flex justify-between items-center mb-10">
             <div>
-              <h1 className="text-3xl font-bold text-white tracking-tight uppercase italic">
-                Gestión de <span className="text-blue-600">Unidades</span>
+              <h1 className="text-3xl font-black text-white italic uppercase tracking-tighter">
+                Control de <span className="text-blue-500">Unidades</span>
               </h1>
-              <p className="text-slate-400 mt-2 font-medium text-[10px] tracking-widest uppercase">
-                Fase: <span className="text-blue-400">Consolidación 2026</span>
+              <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">
+                Gestión de Activos - Institución
               </p>
             </div>
-            <div className="flex gap-4">
-              <button onClick={fetchUnidades} className="p-2.5 text-slate-400 hover:text-white transition-colors">
-                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-              </button>
-              <button onClick={() => setShowModal(true)} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all">
-                <Plus size={20} /> Nueva Unidad
-              </button>
-            </div>
+            <button 
+              onClick={() => setMostrarForm(true)}
+              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black uppercase text-[10px] tracking-widest transition-all shadow-lg shadow-blue-900/20"
+            >
+              <Plus size={14} /> Nueva Unidad
+            </button>
           </header>
 
-          {/* TABLA DINÁMICA */}
-          <div className="bg-slate-900/40 border border-slate-800/60 backdrop-blur-sm rounded-3xl overflow-hidden shadow-2xl">
-            <table className="w-full text-left">
-              <thead className="bg-slate-800/40 text-slate-500 text-[10px] uppercase tracking-[0.2em] border-b border-slate-800/50">
-                <tr>
-                  <th className="px-6 py-5 font-bold">Unidad / Placas</th>
-                  <th className="px-6 py-5 font-bold text-center">Estatus</th>
-                  <th className="px-6 py-5 font-bold text-right">Kilometraje</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {unidades.map((unidad) => (
-                  <tr key={unidad.id} className="hover:bg-blue-600/5 transition-colors group">
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-4">
-                        <div className="p-2.5 bg-blue-500/10 rounded-xl text-blue-400">
-                          <Truck size={20} />
-                        </div>
+          {/* MODAL MAESTRO UNIDADES */}
+          {mostrarForm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={cerrarModal} />
+              <div className="relative bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+                <button onClick={cerrarModal} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors">
+                  <X size={24} />
+                </button>
+                <div className="mb-8">
+                  <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">
+                    {editandoId ? 'Editar' : 'Consolidar'} <span className="text-blue-500">Activo</span>
+                  </h2>
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mt-1">Configuración técnica de la unidad</p>
+                </div>
+                <form onSubmit={guardarUnidad} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Eco / ID Unidad</label>
+                      <input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm outline-none focus:border-blue-500 transition-all font-bold text-white" 
+                        value={formData.numero_economico} onChange={e => setFormData({...formData, numero_economico: e.target.value})} placeholder="Ej. T-01" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Placas</label>
+                      <input className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm uppercase outline-none focus:border-blue-500 transition-all text-white" 
+                        value={formData.placas} onChange={e => setFormData({...formData, placas: e.target.value})} placeholder="00-AA-00" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Modelo / Marca</label>
+                      <input className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm outline-none focus:border-blue-500 transition-all text-white" 
+                        value={formData.modelo} onChange={e => setFormData({...formData, modelo: e.target.value})} placeholder="Kenworth T680 2024" />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-2 block ml-1">Vencimiento Seguro</label>
+                      <input type="date" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm outline-none focus:border-blue-500 text-white" 
+                        value={formData.vencimiento_seguro} onChange={e => setFormData({...formData, vencimiento_seguro: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-black text-orange-500 uppercase tracking-widest mb-2 block ml-1">Vencimiento SCT</label>
+                      <input type="date" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm outline-none focus:border-blue-500 text-white" 
+                        value={formData.vencimiento_sct} onChange={e => setFormData({...formData, vencimiento_sct: e.target.value})} />
+                    </div>
+                  </div>
+                  <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase text-[11px] tracking-[0.3em] hover:bg-blue-500 transition-all shadow-xl shadow-blue-900/20">
+                    {loading ? "Sincronizando..." : editandoId ? "Actualizar Activo" : "Registrar Activo"}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL MANTENIMIENTO (Sigue en el código listo para cuando lo conectemos) */}
+          {mostrarManto && unidadSeleccionada && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => setMostrarManto(false)} />
+              <div className="relative bg-slate-900 border border-slate-800 w-full max-w-4xl rounded-[3rem] shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-10 border-b border-slate-800 flex justify-between items-center">
+                  <div>
+                    <h2 className="text-2xl font-black text-white italic uppercase tracking-tighter">Bitácora: <span className="text-orange-500">Mantenimiento</span></h2>
+                    <p className="text-[10px] font-black text-slate-500 uppercase mt-1">Unidad: {unidadSeleccionada.numero_economico}</p>
+                  </div>
+                  <button onClick={() => setMostrarManto(false)} className="text-slate-500 hover:text-white"><X size={24} /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-10 grid grid-cols-1 md:grid-cols-3 gap-10">
+                  <div className="md:col-span-1 border-r border-slate-800 pr-8">
+                    <h3 className="text-[9px] font-black text-blue-500 uppercase mb-6 tracking-widest">Programar Servicio</h3>
+                  <form onSubmit={agregarMantenimiento} className="space-y-4">
+                    <input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs text-white outline-none focus:border-orange-500" placeholder="Descripción del servicio" value={nuevoManto.descripcion} onChange={e => setNuevoManto({...nuevoManto, descripcion: e.target.value})} />
+                    <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs text-white outline-none focus:border-orange-500"value={nuevoManto.tipo}onChange={e => setNuevoManto({...nuevoManto, tipo: e.target.value})}>
+                    <option value="Preventivo">Preventivo</option>
+                    <option value="Correctivo">Correctivo</option></select>
+                    <input type="number"className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs text-white outline-none focus:border-orange-500" placeholder="Costo $" value={nuevoManto.costo} onChange={e => setNuevoManto({...nuevoManto, costo: e.target.value})} />
+                    <input type="date" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-xs text-white outline-none" value={nuevoManto.fecha} onChange={e => setNuevoManto({...nuevoManto, fecha: e.target.value})} />
+                    <button className="w-full bg-orange-600 text-white p-4 rounded-xl font-black uppercase text-[9px] tracking-widest hover:bg-orange-500 transition-all">
+                       Registrar Servicio
+                    </button>
+                  </form>
+                  </div>
+                  <div className="md:col-span-2 space-y-4">
+                    <h3 className="text-[9px] font-black text-slate-500 uppercase mb-6 tracking-widest">Historial de Servicios</h3>
+                    
+                    {mantenimientos.map(m => (
+                      <div key={m.id} className="bg-slate-950 border border-slate-800 p-5 rounded-2xl flex justify-between items-center group">
                         <div>
-                          <p className="font-bold text-slate-100 uppercase text-sm italic">{unidad.nombre}</p>
-                          <p className="text-[10px] text-slate-500 font-mono tracking-tighter uppercase">{unidad.placas || 'SIN PLACAS'}</p>
+                          <p className="text-xs font-black text-white uppercase italic">{m.descripcion}</p>
+                          <div className="flex gap-3 mt-1">
+                            <span className="text-[9px] text-orange-500 font-bold uppercase">{m.tipo}</span>
+                            <span className="text-[9px] text-slate-500 font-bold uppercase">Costo: ${m.costo}</span>
+                            <span className="text-[9px] text-slate-500 font-bold uppercase">Fecha: {m.fecha}</span>
+                          </div>
                         </div>
+                        <button onClick={() => eliminarManto(m.id)} className="text-slate-800 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
+                          <Trash2 size={14}/>
+                        </button>
                       </div>
-                    </td>
-                    <td className="px-6 py-5 text-center">
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-[9px] font-black bg-green-500/10 text-green-400 border border-green-500/20 uppercase tracking-widest">
-                        ● {unidad.estado || 'Activo'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-5 text-right font-mono text-sm text-slate-300">
-                      {unidad.kilometraje_a?.toLocaleString() || 0} <span className="text-[10px] text-slate-600">KM</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {unidades.length === 0 && !loading && (
-              <div className="p-20 text-center text-slate-600 italic text-xs uppercase tracking-widest">No hay unidades registradas en la Institución.</div>
-            )}
-          </div>
+                    ))}
+
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+
+{/* TABLA DE CONTROL */}
+<div className="p-2 border-slate-800 flex justify-center items-center gap-3">
+  <h2 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Inventario de Activos</h2>
+</div>
+  
+<div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+  <div className="overflow-x-auto p-4">
+    <table className="w-full text-left border-separate border-spacing-y-2">
+      <thead>
+        <tr className="text-[9px] font-black text-slate-600 uppercase tracking-widest">
+          <th className="px-4 pb-4">Unidad</th>
+          <th className="pb-4">Detalles</th>
+          <th className="pb-4">Seguro</th>
+          <th className="pb-4">Permiso SCT</th>
+          <th className="px-4 pb-4 text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {unidades.map((u) => (
+          <tr key={u.id} className="bg-slate-950 border border-slate-800 group hover:border-blue-500/30 transition-all">
+            <td className="py-4 px-4 rounded-l-2xl border-y border-l border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="bg-slate-900 p-2 rounded-lg text-blue-500">
+                  <Truck size={16}/>
+                </div>
+                <div>
+                  <span className="text-sm font-black text-white italic">{u.numero_economico}</span>
+                  {tieneMantoVencido(u.mantenimientos) && (
+                    <div className="flex items-center gap-1 text-[8px] text-orange-500 font-black uppercase mt-0.5 animate-pulse">
+                      <AlertTriangle size={8} /> Manto.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </td>
+            <td className="py-4 border-y border-slate-800">
+              <p className="text-[10px] text-slate-200 font-bold uppercase">{u.modelo || '---'}</p>
+              <p className="text-[9px] text-slate-500 font-mono">{u.placas || 'SIN PLACAS'}</p>
+            </td>
+            <td className="py-4 border-y border-slate-800">
+              <div className="flex flex-col">
+                <span className="text-[8px] text-slate-500 uppercase font-black mb-1">Vence:</span>
+                <p className={`text-[10px] font-bold ${calcularStatusVencimiento(u.vencimiento_seguro).color}`}>
+                  {u.vencimiento_seguro || 'NO REGISTRADO'}
+                </p>
+              </div>
+            </td>
+            <td className="py-4 border-y border-slate-800">
+              <div className="flex flex-col">
+                <span className="text-[8px] text-slate-500 uppercase font-black mb-1">Vence:</span>
+                <p className={`text-[10px] font-bold ${calcularStatusVencimiento(u.vencimiento_sct).color}`}>
+                  {u.vencimiento_sct || 'NO REGISTRADO'}
+                </p>
+              </div>
+            </td>
+            <td className="py-4 px-4 rounded-r-2xl border-y border-r border-slate-800 text-right">
+              <div className="flex justify-end gap-2">
+                <button onClick={() => abrirMantenimiento(u)} className="p-2 text-slate-600 hover:text-orange-500 transition-colors" title="Mantenimiento">
+                  <PenTool size={14} />
+                </button>
+                <button onClick={() => abrirModalEditar(u)} className="p-2 text-slate-600 hover:text-blue-500 transition-colors" title="Editar">
+                  <Edit3 size={14} />
+                </button>
+                <button onClick={() => eliminarUnidad(u.id)} className="p-2 text-slate-800 hover:text-red-500 transition-colors" title="Eliminar">
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
         </div>
       </main>
-
-      {/* MODAL SIMPLIFICADO */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] w-full max-w-md shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-black uppercase italic text-white">Alta de Unidad</h2>
-              <button onClick={() => setShowModal(false)} className="text-slate-500 hover:text-white"><X size={24} /></button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <input 
-                type="text" placeholder="Nombre (Ej: Tracto #204)" required
-                className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-sm"
-                value={formData.nombre} onChange={(e) => setFormData({...formData, nombre: e.target.value})}
-              />
-              <input 
-                type="text" placeholder="Placas"
-                className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-sm"
-                value={formData.placas} onChange={(e) => setFormData({...formData, placas: e.target.value})}
-              />
-              <input 
-                type="number" placeholder="Kilometraje Inicial"
-                className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-sm"
-                value={formData.kilometraje_a} onChange={(e) => setFormData({...formData, kilometraje_a: e.target.value})}
-              />
-              <button className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-lg shadow-blue-900/20 transition-all">
-                Registrar en Flotilla
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

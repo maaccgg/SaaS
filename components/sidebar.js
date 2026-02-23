@@ -19,9 +19,8 @@ const menuItems = [
   { name: 'Inicio', href: '/', icon: LayoutDashboard },
   { name: 'Unidades', href: '/unidades', icon: Truck },
   { name: 'Facturas', href: '/facturas', icon: ReceiptText },
+  { name: 'Gasto operativo', href: '/gastos', icon: TrendingUp },
   { name: 'SAT Carta porte', href: '/fiscal', icon: Scale },
-  { name: 'Gasto operativo', href: '/mantenimiento', icon: TrendingUp },
-  { name: 'Vigencias', href: '/vigencias', icon: FileCheck },
   { name: 'Rutas', href: '/rutas', icon: Map },
 ];
 

@@ -119,7 +119,7 @@ export default function Page() {
             <div onClick={() => router.push('/facturas')} className="cursor-pointer active:scale-95 transition-transform">
               <TarjetaDato titulo="Ingresos" valor={`$${metricas.ingresos.toLocaleString()}`} color="blue" />
             </div>
-            <div onClick={() => router.push('/mantenimiento')} className="cursor-pointer active:scale-95 transition-transform">
+            <div onClick={() => router.push('/gastos')} className="cursor-pointer active:scale-95 transition-transform">
               <TarjetaDato titulo="Gasto operativo" valor={`$${metricas.gastos.toLocaleString()}`} color="blue" />
             </div>
           </div>
