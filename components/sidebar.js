@@ -20,8 +20,9 @@ const menuItems = [
   { name: 'Unidades', href: '/unidades', icon: Truck },
   { name: 'Facturas', href: '/facturas', icon: ReceiptText },
   { name: 'Gasto operativo', href: '/gastos', icon: TrendingUp },
-  { name: 'SAT Carta porte', href: '/fiscal', icon: Scale },
+  { name: 'SAT Carta porte', href: '/sat', icon: Scale },
   { name: 'Rutas', href: '/rutas', icon: Map },
+  { name: 'Viajes', href: '/viajes', icon: FileCheck},
 ];
 
 export default function Sidebar() {
