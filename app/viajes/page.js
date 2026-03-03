@@ -4,11 +4,10 @@ import { supabase } from '@/lib/supabaseClient';
 import { 
   Truck, User, MapPin, Package, PlusCircle, 
   Trash2, FileText, X, Navigation, Calendar, 
-  Download, Info, DollarSign
+  Download, DollarSign
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 
-// Importaciones para PDF (Corregidas para evitar errores de función)
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -18,24 +17,17 @@ export default function ViajesPage() {
   const [viajes, setViajes] = useState([]);
   const [mostrarModal, setMostrarModal] = useState(false);
   
-  // Catálogos
   const [catalogos, setCatalogos] = useState({ 
-    unidades: [], operadores: [], ubicaciones: [], mercancias: [] 
+    unidades: [], operadores: [], ubicaciones: [], mercancias: [], remolques: [] 
   });
   const [clientes, setClientes] = useState([]);
   const [perfilEmisor, setPerfilEmisor] = useState(null);
 
-  // Formulario
   const [formData, setFormData] = useState({
-    unidad_id: '', 
-    operador_id: '', 
-    origen_id: '', 
-    destino_id: '', 
-    mercancia_id: '', 
-    cantidad_mercancia: 1, 
+    unidad_id: '', operador_id: '', origen_id: '', destino_id: '', 
+    mercancia_id: '', remolque_id: '', cantidad_mercancia: 1, 
     fecha_salida: new Date().toISOString().split('T')[0],
-    cliente_id: '', // Para factura automática
-    monto_flete: ''  // Para factura automática
+    cliente_id: '', monto_flete: ''
   });
 
   useEffect(() => {
@@ -49,27 +41,25 @@ export default function ViajesPage() {
     });
   }, []);
 
-  // --- OBTENCIÓN DE DATOS ---
-
   async function obtenerPerfilFiscal(userId) {
     const { data } = await supabase.from('perfil_emisor').select('*').eq('usuario_id', userId).single();
     if (data) setPerfilEmisor(data);
   }
 
   async function cargarCatalogos(userId) {
-    const [u, o, ub, m, cl] = await Promise.all([
-      supabase.from('unidades').select('id, numero_economico').eq('usuario_id', userId),
-      supabase.from('operadores').select('id, nombre_completo').eq('usuario_id', userId),
-      supabase.from('ubicaciones').select('id, nombre_lugar, codigo_postal').eq('usuario_id', userId),
-      supabase.from('mercancias').select('id, descripcion, peso_unitario_kg').eq('usuario_id', userId),
-      supabase.from('clientes').select('id, nombre, dias_credito').eq('usuario_id', userId)
+    const [u, o, ub, m, cl, r] = await Promise.all([
+      supabase.from('unidades').select('*').eq('usuario_id', userId),
+      supabase.from('operadores').select('*').eq('usuario_id', userId),
+      supabase.from('ubicaciones').select('*').eq('usuario_id', userId),
+      supabase.from('mercancias').select('*').eq('usuario_id', userId),
+      supabase.from('clientes').select('*').eq('usuario_id', userId),
+      supabase.from('remolques').select('*').eq('usuario_id', userId) // Nuevo catálogo
     ]);
     
     setCatalogos({ 
-      unidades: u.data || [], 
-      operadores: o.data || [], 
-      ubicaciones: ub.data || [], 
-      mercancias: m.data || [] 
+      unidades: u.data || [], operadores: o.data || [], 
+      ubicaciones: ub.data || [], mercancias: m.data || [],
+      remolques: r.data || []
     });
     setClientes(cl.data || []);
   }
@@ -77,67 +67,140 @@ export default function ViajesPage() {
   async function obtenerViajes(userId) {
     const { data } = await supabase.from('viajes').select(`
         *,
-        unidades(numero_economico),
-        operadores(nombre_completo, rfc, numero_licencia),
-        origen:ubicaciones!viajes_origen_id_fkey(nombre_lugar, codigo_postal),
-        destino:ubicaciones!viajes_destino_id_fkey(nombre_lugar, codigo_postal),
-        mercancias(descripcion, clave_sat)
+        unidades(*),
+        operadores(*),
+        remolques(*),
+        origen:ubicaciones!viajes_origen_id_fkey(*),
+        destino:ubicaciones!viajes_destino_id_fkey(*),
+        mercancias(*)
       `).eq('usuario_id', userId).order('created_at', { ascending: false });
     setViajes(data || []);
   }
 
-  // --- GENERACIÓN DE PDF ---
-
+  // --- GENERADOR DE PDF (FORMATO INSPIRADO EN INDUSTRIA) ---
   const generarPDF = (viaje) => {
-    const doc = new jsPDF();
-    const azul = [37, 99, 235];
-
-    doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, 210, 40, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(20);
-    doc.text("MANIFIESTO DE CARGA", 14, 22);
-    doc.setFontSize(8);
-    doc.text(`FOLIO: #000${viaje.folio_interno} | FECHA: ${viaje.fecha_salida}`, 14, 30);
-
-    doc.setTextColor(0);
-    doc.setFontSize(10);
+    const doc = new jsPDF('p', 'mm', 'a4');
+    
+    // Título Principal
+    doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
-    doc.text("EMISOR FISCAL", 14, 50);
+    doc.text("CARTA PORTE NACIONAL DE INGRESO 3.1", 105, 15, { align: 'center' });
+    
+    doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
-    doc.text(perfilEmisor?.razon_social || "EMPRESA NO CONFIGURADA", 14, 56);
-    doc.text(`RFC: ${perfilEmisor?.rfc || "---"}`, 14, 61);
+    doc.text(`Fecha de elaboración: ${new Date().toISOString().split('T')[0]}`, 14, 22);
 
+    // BLOQUE 1: EMISOR Y RECEPTOR
+    doc.setDrawColor(200);
+    doc.rect(14, 25, 182, 30); // Caja principal
+    doc.line(105, 25, 105, 55); // División central
+    
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("EMISOR:", 16, 30);
+    doc.text("RECEPTOR:", 107, 30);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text(`${perfilEmisor?.razon_social || 'EMPRESA DE LOGÍSTICA SA DE CV'}`, 16, 35);
+    doc.text(`RFC: ${perfilEmisor?.rfc || 'XAXX010101000'} | Régimen: ${perfilEmisor?.regimen_fiscal || '601'}`, 16, 40);
+    doc.text(`CP: ${perfilEmisor?.codigo_postal || '00000'}`, 16, 45);
+
+    doc.text("CLIENTE PÚBLICO EN GENERAL", 107, 35); // En el futuro lo jalamos de la factura
+    doc.text(`UUID: (PENDIENTE DE TIMBRADO OFICIAL)`, 107, 45);
+    doc.text(`Folio Interno: #${String(viaje.folio_interno).padStart(4, '0')}`, 107, 50);
+
+    // BLOQUE 2: ORIGEN Y DESTINO
+    doc.setFont("helvetica", "bold");
+    doc.text("ORIGEN", 14, 62);
+    doc.text("DESTINO", 105, 62);
+    
+    doc.setFont("helvetica", "normal");
+    doc.text(`${viaje.origen?.nombre_lugar}`, 14, 67);
+    doc.text(`C.P.: ${viaje.origen?.codigo_postal}`, 14, 71);
+    
+    doc.text(`${viaje.destino?.nombre_lugar}`, 105, 67);
+    doc.text(`C.P.: ${viaje.destino?.codigo_postal}`, 105, 71);
+
+    // BLOQUE 3: AUTOTRANSPORTE Y FIGURAS
+autoTable(doc, {
+  startY: 78,
+  head: [['SCT', 'CONFIG/PLACAS', 'AÑO', 'ASEGURADORA', 'NUM. POLIZA']],
+  body: [[
+    viaje.unidades?.permiso_sict || 'TPAF01', 
+    `${viaje.unidades?.configuracion_vehicular || 'T3S1'} / ${viaje.unidades?.placas || '---'}`, 
+    viaje.unidades?.anio_modelo || '---', 
+    viaje.unidades?.aseguradora_rc || 'SIN REGISTRO', // <--- CAMBIO AQUÍ
+    viaje.unidades?.poliza_rc || 'PENDIENTE'          // <--- CAMBIO AQUÍ
+  ]],
+  theme: 'grid',
+  styles: { fontSize: 7, cellPadding: 2 },
+  headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] }
+});
     autoTable(doc, {
-      startY: 70,
-      head: [['ORIGEN', 'DESTINO', 'OPERADOR', 'UNIDAD']],
-      body: [[
-        viaje.origen?.nombre_lugar, 
-        viaje.destino?.nombre_lugar, 
-        viaje.operadores?.nombre_completo, 
-        viaje.unidades?.numero_economico
-      ]],
+      startY: doc.lastAutoTable.finalY + 2,
+      head: [['TIPO FIGURA', 'DETALLE']],
+      body: [
+        ['REMOLQUE', `Placas: ${viaje.remolques?.placas || 'N/A'} | Económico: ${viaje.remolques?.numero_economico || 'N/A'} | Tipo: ${viaje.remolques?.subtipo_remolque || 'N/A'}`],
+        ['OPERADOR', `Nombre: ${viaje.operadores?.nombre_completo} | Licencia: ${viaje.operadores?.numero_licencia} | RFC: ${viaje.operadores?.rfc}`]
+      ],
       theme: 'grid',
-      headStyles: { fillColor: azul }
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] }
     });
 
+    // BLOQUE 4: MERCANCÍAS
     autoTable(doc, {
-      startY: doc.lastAutoTable.finalY + 10,
-      head: [['CANTIDAD', 'DESCRIPCIÓN', 'CLAVE SAT', 'PESO TOTAL']],
+      startY: doc.lastAutoTable.finalY + 8,
+      head: [['CANTIDAD', 'DESCRIPCION / CLAVE SAT', 'PESO EN KGS', 'MATERIAL PELIG.']],
       body: [[
         viaje.cantidad_mercancia,
-        viaje.mercancias?.descripcion,
-        viaje.mercancias?.clave_sat,
-        `${viaje.peso_total_kg} KG`
+        `${viaje.mercancias?.descripcion}\nSAT: ${viaje.mercancias?.clave_sat}`,
+        `${viaje.peso_total_kg} KGM`,
+        'NO'
       ]],
-      theme: 'striped',
-      headStyles: { fillColor: [51, 51, 51] }
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 3 },
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] }
     });
 
-    doc.save(`Manifiesto_#${viaje.folio_interno}.pdf`);
+    // BLOQUE 5: SIMULACIÓN DE SELLOS (Para visualizar el espacio del PAC)
+    const finalY = doc.lastAutoTable.finalY + 10;
+    
+    // Cajas para Códigos QR (Simulación)
+    doc.setDrawColor(150);
+    doc.rect(14, finalY, 30, 30);
+    doc.rect(14, finalY + 35, 30, 30);
+    doc.setFontSize(6);
+    doc.setTextColor(150);
+    doc.text("QR SAT", 23, finalY + 15);
+    doc.text("QR VIAJE", 22, finalY + 50);
+
+    // Textos de Sellos
+    doc.setTextColor(0);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("SELLO CFDI:", 50, finalY + 5);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5);
+    doc.text("(Se generará automáticamente al integrar con el Proveedor Autorizado de Certificación)", 50, finalY + 8);
+    
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "bold");
+    doc.text("SELLO SAT:", 50, finalY + 15);
+    
+    doc.text("CADENA ORIGINAL DEL COMPLEMENTO DE CERTIFICACION DIGITAL DEL SAT:", 50, finalY + 25);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6);
+    doc.text("||1.1|PENDIENTE-DE-TIMBRADO|2026-02-27T17:20:56|PAC_ID|SELLO_AQUI||", 50, finalY + 28);
+
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.text("ESTE DOCUMENTO ES UNA REPRESENTACIÓN IMPRESA DE UN CFDI (VERSIÓN BORRADOR)", 105, 285, { align: 'center' });
+
+    doc.save(`CartaPorte_Folio_${viaje.folio_interno}.pdf`);
   };
 
-  // --- LÓGICA DE REGISTRO INTEGRADO ---
+  // --- LÓGICA DE REGISTRO ---
   const registrarViaje = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -146,10 +209,10 @@ export default function ViajesPage() {
       const clienteObj = clientes.find(c => c.id === formData.cliente_id);
       const pesoCalc = m ? m.peso_unitario_kg * formData.cantidad_mercancia : 0;
 
-      // 1. Crear el Viaje
       const { data: nuevoViaje, error: errViaje } = await supabase.from('viajes').insert([{
         unidad_id: formData.unidad_id,
         operador_id: formData.operador_id,
+        remolque_id: formData.remolque_id || null, // Se añade el remolque
         origen_id: formData.origen_id,
         destino_id: formData.destino_id,
         mercancia_id: formData.mercancia_id,
@@ -162,7 +225,6 @@ export default function ViajesPage() {
 
       if (errViaje) throw errViaje;
 
-      // 2. Crear Factura Automática (Si se ingresó monto)
       if (formData.monto_flete > 0 && formData.cliente_id) {
         const fechaVenc = new Date(formData.fecha_salida);
         fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
@@ -175,15 +237,14 @@ export default function ViajesPage() {
           fecha_viaje: formData.fecha_salida,
           fecha_vencimiento: fechaVenc.toISOString().split('T')[0],
           estatus_pago: 'Pendiente',
-          ruta: `${nuevoViaje.id}` // Referencia cruzada
+          ruta: `Folio #${nuevoViaje.id}` 
         }]);
       }
 
       setMostrarModal(false);
-      setFormData({ unidad_id: '', operador_id: '', origen_id: '', destino_id: '', mercancia_id: '', cantidad_mercancia: 1, fecha_salida: new Date().toISOString().split('T')[0], cliente_id: '', monto_flete: '' });
+      setFormData({ unidad_id: '', operador_id: '', origen_id: '', destino_id: '', mercancia_id: '', remolque_id: '', cantidad_mercancia: 1, fecha_salida: new Date().toISOString().split('T')[0], cliente_id: '', monto_flete: '' });
       await obtenerViajes(sesion.user.id);
-      alert("Viaje y Factura consolidados exitosamente.");
-
+      alert("Viaje Consolidado");
     } catch (err) {
       alert("Error: " + err.message);
     } finally {
@@ -210,7 +271,7 @@ export default function ViajesPage() {
               <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">
                 Logística <span className="text-blue-500">Operativa</span>
               </h1>
-              <p className="text-slate-500 text-[9px] font-black uppercase tracking-[0.3em] mt-2">Bitácora de Manifiestos</p>
+              <p className="text-slate-500 text-[9px] font-black uppercase tracking-[0.3em] mt-2">Bitácora de Carta Porte Nacional</p>
             </div>
             <button onClick={() => setMostrarModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg flex items-center gap-2">
               <PlusCircle size={16} /> Programar Viaje
@@ -218,12 +279,7 @@ export default function ViajesPage() {
           </header>
 
           <div className="grid grid-cols-1 gap-4">
-            {viajes.length === 0 ? (
-              <div className="text-center py-20 bg-slate-900/20 border border-dashed border-slate-800 rounded-[2.5rem]">
-                <p className="text-slate-600 text-[10px] font-black uppercase tracking-widest">Sin registros activos</p>
-              </div>
-            ) : (
-              viajes.map((v) => (
+            {viajes.map((v) => (
                 <div key={v.id} className="bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] hover:border-blue-500/30 transition-all group backdrop-blur-sm">
                   <div className="flex items-center gap-8">
                     <div className="min-w-[100px]">
@@ -236,7 +292,7 @@ export default function ViajesPage() {
                         <Navigation size={12} className="text-blue-500 rotate-90" />
                         <span className="text-[11px] font-black text-white uppercase italic">{v.destino?.nombre_lugar}</span>
                       </div>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase">{v.unidades?.numero_economico} | {v.operadores?.nombre_completo}</p>
+                      <p className="text-[9px] text-slate-500 font-bold uppercase">{v.unidades?.numero_economico} | {v.operadores?.nombre_completo} {v.remolques ? `| Remolque: ${v.remolques.numero_economico}` : ''}</p>
                     </div>
                     <div className="flex gap-2 ml-auto opacity-0 group-hover:opacity-100 transition-all">
                       <button onClick={() => generarPDF(v)} className="p-3 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-colors"><FileText size={18}/></button>
@@ -244,31 +300,38 @@ export default function ViajesPage() {
                     </div>
                   </div>
                 </div>
-              ))
-            )}
+              ))}
           </div>
 
-          {/* MODAL AJUSTADO (MAX-W-3XL) */}
           {mostrarModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={() => setMostrarModal(false)} />
-              <div className="relative bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95">
+              <div className="relative bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in-95 overflow-y-auto max-h-[90vh]">
                 <button onClick={() => setMostrarModal(false)} className="absolute top-8 right-8 text-slate-500 hover:text-white transition-colors"><X size={24} /></button>
                 <h2 className="text-2xl font-black text-white italic uppercase mb-8 text-center lg:text-left tracking-tighter">Programar <span className="text-blue-500">Operación</span></h2>
                 
                 <form onSubmit={registrarViaje} className="space-y-6">
-                  {/* Bloque Logístico */}
-                  <div className="grid grid-cols-2 gap-4">
+                  {/* Autotransporte y Figura */}
+                  <div className="grid grid-cols-3 gap-4">
                     <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
                       value={formData.unidad_id} onChange={e => setFormData({...formData, unidad_id: e.target.value})}>
-                      <option value="">Unidad...</option>
+                      <option value="">Tractocamión...</option>
                       {catalogos.unidades.map(u => <option key={u.id} value={u.id}>{u.numero_economico}</option>)}
+                    </select>
+                    <select className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
+                      value={formData.remolque_id} onChange={e => setFormData({...formData, remolque_id: e.target.value})}>
+                      <option value="">Remolque (Opcional)...</option>
+                      {catalogos.remolques.map(r => <option key={r.id} value={r.id}>{r.numero_economico} - {r.placas}</option>)}
                     </select>
                     <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
                       value={formData.operador_id} onChange={e => setFormData({...formData, operador_id: e.target.value})}>
                       <option value="">Operador...</option>
                       {catalogos.operadores.map(o => <option key={o.id} value={o.id}>{o.nombre_completo}</option>)}
                     </select>
+                  </div>
+
+                  {/* Origen Destino */}
+                  <div className="grid grid-cols-2 gap-4">
                     <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
                       value={formData.origen_id} onChange={e => setFormData({...formData, origen_id: e.target.value})}>
                       <option value="">Punto A (Origen)...</option>
@@ -281,7 +344,7 @@ export default function ViajesPage() {
                     </select>
                   </div>
 
-                  {/* Bloque Carga */}
+                  {/* Carga */}
                   <div className="grid grid-cols-3 gap-4">
                     <select required className="col-span-2 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
                       value={formData.mercancia_id} onChange={e => setFormData({...formData, mercancia_id: e.target.value})}>
@@ -292,18 +355,18 @@ export default function ViajesPage() {
                       value={formData.cantidad_mercancia} onChange={e => setFormData({...formData, cantidad_mercancia: e.target.value})} />
                   </div>
 
-                  {/* Bloque Cobranza (Nuevo) */}
+                  {/* Facturación Automática */}
                   <div className="p-6 bg-blue-600/5 border border-blue-500/10 rounded-2xl space-y-4">
                     <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
-                      <DollarSign size={12} /> Facturación Automática
+                      <DollarSign size={12} /> Facturación Automática (Opcional)
                     </p>
                     <div className="grid grid-cols-2 gap-4">
-                      <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
+                      <select className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
                         value={formData.cliente_id} onChange={e => setFormData({...formData, cliente_id: e.target.value})}>
                         <option value="">Cliente flete...</option>
                         {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                       </select>
-                      <input required type="number" placeholder="Monto flete $" className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-mono"
+                      <input type="number" placeholder="Monto flete $" className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-mono"
                         value={formData.monto_flete} onChange={e => setFormData({...formData, monto_flete: e.target.value})} />
                     </div>
                   </div>
@@ -312,7 +375,7 @@ export default function ViajesPage() {
                     value={formData.fecha_salida} onChange={e => setFormData({...formData, fecha_salida: e.target.value})} />
 
                   <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black uppercase text-[10px] tracking-[0.2em] shadow-xl hover:bg-blue-500 transition-all">
-                    {loading ? "Sincronizando..." : "Consolidar Viaje y Factura"}
+                    {loading ? "Sincronizando..." : "Consolidar Viaje Nacional"}
                   </button>
                 </form>
               </div>
