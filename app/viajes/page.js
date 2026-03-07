@@ -1,10 +1,11 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation'; // <-- Importamos el router para navegar
 import { supabase } from '@/lib/supabaseClient';
 import { 
   Truck, User, MapPin, Package, PlusCircle, 
   Trash2, FileText, X, Navigation, Calendar, 
-  Download, DollarSign
+  Download, DollarSign, Receipt 
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 
@@ -12,6 +13,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export default function ViajesPage() {
+  const router = useRouter(); // <-- Inicializamos el router
   const [sesion, setSesion] = useState(null);
   const [loading, setLoading] = useState(false);
   const [viajes, setViajes] = useState([]);
@@ -53,7 +55,7 @@ export default function ViajesPage() {
       supabase.from('ubicaciones').select('*').eq('usuario_id', userId),
       supabase.from('mercancias').select('*').eq('usuario_id', userId),
       supabase.from('clientes').select('*').eq('usuario_id', userId),
-      supabase.from('remolques').select('*').eq('usuario_id', userId) // Nuevo catálogo
+      supabase.from('remolques').select('*').eq('usuario_id', userId)
     ]);
     
     setCatalogos({ 
@@ -70,6 +72,7 @@ export default function ViajesPage() {
         unidades(*),
         operadores(*),
         remolques(*),
+        clientes(*),
         origen:ubicaciones!viajes_origen_id_fkey(*),
         destino:ubicaciones!viajes_destino_id_fkey(*),
         mercancias(*)
@@ -77,11 +80,10 @@ export default function ViajesPage() {
     setViajes(data || []);
   }
 
-  // --- GENERADOR DE PDF (FORMATO INSPIRADO EN INDUSTRIA) ---
+  // --- GENERADOR DE PDF ---
   const generarPDF = (viaje) => {
     const doc = new jsPDF('p', 'mm', 'a4');
     
-    // Título Principal
     doc.setFontSize(12);
     doc.setFont("helvetica", "bold");
     doc.text("CARTA PORTE NACIONAL DE INGRESO 3.1", 105, 15, { align: 'center' });
@@ -90,10 +92,9 @@ export default function ViajesPage() {
     doc.setFont("helvetica", "normal");
     doc.text(`Fecha de elaboración: ${new Date().toISOString().split('T')[0]}`, 14, 22);
 
-    // BLOQUE 1: EMISOR Y RECEPTOR
     doc.setDrawColor(200);
-    doc.rect(14, 25, 182, 30); // Caja principal
-    doc.line(105, 25, 105, 55); // División central
+    doc.rect(14, 25, 182, 30);
+    doc.line(105, 25, 105, 55);
     
     doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
@@ -105,11 +106,12 @@ export default function ViajesPage() {
     doc.text(`RFC: ${perfilEmisor?.rfc || 'XAXX010101000'} | Régimen: ${perfilEmisor?.regimen_fiscal || '601'}`, 16, 40);
     doc.text(`CP: ${perfilEmisor?.codigo_postal || '00000'}`, 16, 45);
 
-    doc.text("CLIENTE PÚBLICO EN GENERAL", 107, 35); // En el futuro lo jalamos de la factura
-    doc.text(`UUID: (PENDIENTE DE TIMBRADO OFICIAL)`, 107, 45);
+    // RECEPTOR DINÁMICO
+    doc.text(`${viaje.clientes?.nombre || 'PÚBLICO EN GENERAL'}`, 107, 35);
+    doc.text(`RFC: ${viaje.clientes?.rfc || 'XAXX010101000'}`, 107, 40);
+    doc.text(`CP: ${viaje.clientes?.codigo_postal || '00000'} | Régimen: ${viaje.clientes?.regimen_fiscal || '601'}`, 107, 45);
     doc.text(`Folio Interno: #${String(viaje.folio_interno).padStart(4, '0')}`, 107, 50);
 
-    // BLOQUE 2: ORIGEN Y DESTINO
     doc.setFont("helvetica", "bold");
     doc.text("ORIGEN", 14, 62);
     doc.text("DESTINO", 105, 62);
@@ -121,21 +123,21 @@ export default function ViajesPage() {
     doc.text(`${viaje.destino?.nombre_lugar}`, 105, 67);
     doc.text(`C.P.: ${viaje.destino?.codigo_postal}`, 105, 71);
 
-    // BLOQUE 3: AUTOTRANSPORTE Y FIGURAS
-autoTable(doc, {
-  startY: 78,
-  head: [['SCT', 'CONFIG/PLACAS', 'AÑO', 'ASEGURADORA', 'NUM. POLIZA']],
-  body: [[
-    viaje.unidades?.permiso_sict || 'TPAF01', 
-    `${viaje.unidades?.configuracion_vehicular || 'T3S1'} / ${viaje.unidades?.placas || '---'}`, 
-    viaje.unidades?.anio_modelo || '---', 
-    viaje.unidades?.aseguradora_rc || 'SIN REGISTRO', // <--- CAMBIO AQUÍ
-    viaje.unidades?.poliza_rc || 'PENDIENTE'          // <--- CAMBIO AQUÍ
-  ]],
-  theme: 'grid',
-  styles: { fontSize: 7, cellPadding: 2 },
-  headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] }
-});
+    autoTable(doc, {
+      startY: 78,
+      head: [['SCT', 'CONFIG/PLACAS', 'AÑO', 'ASEGURADORA', 'NUM. POLIZA']],
+      body: [[
+        viaje.unidades?.permiso_sict || 'TPAF01', 
+        `${viaje.unidades?.configuracion_vehicular || 'T3S1'} / ${viaje.unidades?.placas || '---'}`, 
+        viaje.unidades?.anio_modelo || '---', 
+        viaje.unidades?.aseguradora_rc || 'SIN REGISTRO', 
+        viaje.unidades?.poliza_rc || 'PENDIENTE'
+      ]],
+      theme: 'grid',
+      styles: { fontSize: 7, cellPadding: 2 },
+      headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] }
+    });
+
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 2,
       head: [['TIPO FIGURA', 'DETALLE']],
@@ -148,7 +150,6 @@ autoTable(doc, {
       headStyles: { fillColor: [240, 240, 240], textColor: [0, 0, 0] }
     });
 
-    // BLOQUE 4: MERCANCÍAS
     autoTable(doc, {
       startY: doc.lastAutoTable.finalY + 8,
       head: [['CANTIDAD', 'DESCRIPCION / CLAVE SAT', 'PESO EN KGS', 'MATERIAL PELIG.']],
@@ -163,10 +164,7 @@ autoTable(doc, {
       headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255] }
     });
 
-    // BLOQUE 5: SIMULACIÓN DE SELLOS (Para visualizar el espacio del PAC)
     const finalY = doc.lastAutoTable.finalY + 10;
-    
-    // Cajas para Códigos QR (Simulación)
     doc.setDrawColor(150);
     doc.rect(14, finalY, 30, 30);
     doc.rect(14, finalY + 35, 30, 30);
@@ -175,14 +173,13 @@ autoTable(doc, {
     doc.text("QR SAT", 23, finalY + 15);
     doc.text("QR VIAJE", 22, finalY + 50);
 
-    // Textos de Sellos
     doc.setTextColor(0);
     doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
     doc.text("SELLO CFDI:", 50, finalY + 5);
     doc.setFont("helvetica", "normal");
     doc.setFontSize(5);
-    doc.text("(Se generará automáticamente al integrar con el Proveedor Autorizado de Certificación)", 50, finalY + 8);
+    doc.text("(Se generará automáticamente al integrar con el PAC)", 50, finalY + 8);
     
     doc.setFontSize(7);
     doc.setFont("helvetica", "bold");
@@ -195,12 +192,11 @@ autoTable(doc, {
 
     doc.setFontSize(8);
     doc.setFont("helvetica", "bold");
-    doc.text("ESTE DOCUMENTO ES UNA REPRESENTACIÓN IMPRESA DE UN CFDI (VERSIÓN BORRADOR)", 105, 285, { align: 'center' });
+    doc.text("ESTE DOCUMENTO ES UNA REPRESENTACIÓN IMPRESA DE UN CFDI", 105, 285, { align: 'center' });
 
     doc.save(`CartaPorte_Folio_${viaje.folio_interno}.pdf`);
   };
 
-  // --- LÓGICA DE REGISTRO ---
   const registrarViaje = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -209,13 +205,29 @@ autoTable(doc, {
       const clienteObj = clientes.find(c => c.id === formData.cliente_id);
       const pesoCalc = m ? m.peso_unitario_kg * formData.cantidad_mercancia : 0;
 
+      // 1. LÓGICA DE FOLIO DINÁMICO: Buscamos el folio actual más alto en la BD
+      const { data: maxFolioData } = await supabase
+        .from('viajes')
+        .select('folio_interno')
+        .eq('usuario_id', sesion.user.id)
+        .order('folio_interno', { ascending: false })
+        .limit(1);
+      
+      let nuevoFolio = 1;
+      if (maxFolioData && maxFolioData.length > 0 && maxFolioData[0].folio_interno) {
+        nuevoFolio = maxFolioData[0].folio_interno + 1;
+      }
+
+      // 2. Insertamos el viaje forzando el nuevo folio consecutivo
       const { data: nuevoViaje, error: errViaje } = await supabase.from('viajes').insert([{
+        folio_interno: nuevoFolio,
         unidad_id: formData.unidad_id,
         operador_id: formData.operador_id,
-        remolque_id: formData.remolque_id || null, // Se añade el remolque
+        remolque_id: formData.remolque_id || null,
         origen_id: formData.origen_id,
         destino_id: formData.destino_id,
         mercancia_id: formData.mercancia_id,
+        cliente_id: formData.cliente_id || null, // Guardar el cliente en el viaje
         cantidad_mercancia: parseFloat(formData.cantidad_mercancia),
         peso_total_kg: pesoCalc,
         fecha_salida: formData.fecha_salida,
@@ -225,6 +237,7 @@ autoTable(doc, {
 
       if (errViaje) throw errViaje;
 
+      // 3. Creación de factura automática
       if (formData.monto_flete > 0 && formData.cliente_id) {
         const fechaVenc = new Date(formData.fecha_salida);
         fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
@@ -237,14 +250,13 @@ autoTable(doc, {
           fecha_viaje: formData.fecha_salida,
           fecha_vencimiento: fechaVenc.toISOString().split('T')[0],
           estatus_pago: 'Pendiente',
-          ruta: `Folio #${nuevoViaje.id}` 
+          ruta: `Folio Viaje #${nuevoFolio}` 
         }]);
       }
 
       setMostrarModal(false);
       setFormData({ unidad_id: '', operador_id: '', origen_id: '', destino_id: '', mercancia_id: '', remolque_id: '', cantidad_mercancia: 1, fecha_salida: new Date().toISOString().split('T')[0], cliente_id: '', monto_flete: '' });
       await obtenerViajes(sesion.user.id);
-      alert("Viaje Consolidado");
     } catch (err) {
       alert("Error: " + err.message);
     } finally {
@@ -253,8 +265,13 @@ autoTable(doc, {
   };
 
   const eliminarViaje = async (id) => {
-    if (!confirm("¿Deseas eliminar este viaje?")) return;
+    if (!confirm("¿Deseas eliminar este viaje? También se eliminará su factura asociada si existe.")) return;
+    
+    // Primero intentamos borrar la factura asociada para evitar errores de llave foránea
+    await supabase.from('facturas').delete().eq('viaje_id', id);
+    // Luego borramos el viaje
     await supabase.from('viajes').delete().eq('id', id);
+    
     obtenerViajes(sesion.user.id);
   };
 
@@ -293,11 +310,35 @@ autoTable(doc, {
                         <span className="text-[11px] font-black text-white uppercase italic">{v.destino?.nombre_lugar}</span>
                       </div>
                       <p className="text-[9px] text-slate-500 font-bold uppercase">{v.unidades?.numero_economico} | {v.operadores?.nombre_completo} {v.remolques ? `| Remolque: ${v.remolques.numero_economico}` : ''}</p>
+                      {/* Mostrar el cliente asociado si existe */}
+                      {v.clientes && <p className="text-[9px] text-blue-400 font-bold uppercase mt-1">Cliente: {v.clientes.nombre}</p>}
                     </div>
+                    
+                    {/* BOTONES DE ACCIÓN RÁPIDA */}
                     <div className="flex gap-2 ml-auto opacity-0 group-hover:opacity-100 transition-all">
-                      <button onClick={() => generarPDF(v)} className="p-3 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-colors"><FileText size={18}/></button>
-                      <button onClick={() => eliminarViaje(v.id)} className="p-3 bg-slate-950 text-slate-600 hover:text-red-500 rounded-xl transition-colors"><Trash2 size={18}/></button>
+                      {/* NUEVO BOTÓN: Ir a Factura */}
+                      <button 
+                        onClick={() => router.push(`/facturas?viaje_id=${v.id}`)} 
+                        title="Ver Factura de este Viaje"
+                        className="p-3 bg-green-600/10 text-green-500 hover:bg-green-600 hover:text-white rounded-xl transition-colors">
+                        <Receipt size={18}/>
+                      </button>
+                      
+                      <button 
+                        onClick={() => generarPDF(v)} 
+                        title="Descargar Carta Porte PDF"
+                        className="p-3 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white rounded-xl transition-colors">
+                        <FileText size={18}/>
+                      </button>
+                      
+                      <button 
+                        onClick={() => eliminarViaje(v.id)} 
+                        title="Eliminar Viaje"
+                        className="p-3 bg-slate-950 text-slate-600 hover:text-red-500 rounded-xl transition-colors">
+                        <Trash2 size={18}/>
+                      </button>
                     </div>
+
                   </div>
                 </div>
               ))}
@@ -358,12 +399,12 @@ autoTable(doc, {
                   {/* Facturación Automática */}
                   <div className="p-6 bg-blue-600/5 border border-blue-500/10 rounded-2xl space-y-4">
                     <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest flex items-center gap-2">
-                      <DollarSign size={12} /> Facturación Automática (Opcional)
+                      <DollarSign size={12} /> Cliente y Facturación (Receptor)
                     </p>
                     <div className="grid grid-cols-2 gap-4">
-                      <select className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white"
+                      <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-bold"
                         value={formData.cliente_id} onChange={e => setFormData({...formData, cliente_id: e.target.value})}>
-                        <option value="">Cliente flete...</option>
+                        <option value="">Seleccionar Cliente...</option>
                         {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                       </select>
                       <input type="number" placeholder="Monto flete $" className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-mono"
