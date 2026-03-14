@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { 
-  Truck, User, MapPin, Package, PlusCircle, Trash2, FileText, Navigation, Receipt, ShieldCheck, DollarSign, Loader2, Edit2, XCircle, FileCode, X,
+  Truck, User, MapPin, Package, PlusCircle, Trash2, FileText, Navigation, Receipt, ShieldCheck, DollarSign, Loader2, Edit2, XCircle, FileCode, X, Calendar, ChevronDown
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 import { generarPDFCartaPorte } from '@/utils/PdfCartaPorte'; 
@@ -16,17 +16,31 @@ export default function ViajesPage() {
   const [mostrarModal, setMostrarModal] = useState(false);
   const [editandoId, setEditandoId] = useState(null); 
   
+  const [filtroEstatus, setFiltroEstatus] = useState('Todos'); 
+  const [mostrarFiltro, setMostrarFiltro] = useState(false);
+  const [fechaInicio, setFechaInicio] = useState('');
+  const [fechaFin, setFechaFin] = useState('');
+  const [filtroActivo, setFiltroActivo] = useState(false);
+  
   const [catalogos, setCatalogos] = useState({ unidades: [], operadores: [], ubicaciones: [], mercancias: [], remolques: [] });
   const [clientes, setClientes] = useState([]);
   const [perfilEmisor, setPerfilEmisor] = useState(null);
 
   const formInicial = {
-    unidad_id: '', operador_id: '', origen_id: '', destino_id: '', 
-    cliente_id: '', monto_flete: '', distancia_km: '', fecha_salida: new Date().toISOString().split('T')[0],
-    mercancias_detalle: [{ mercancia_id: '', cantidad: 1, peso_kg: '' }] 
+    unidad_id: '', remolque_id: '', operador_id: '', origen_id: '', destino_id: '', 
+    cliente_id: '', monto_flete: '', distancia_km: '', referencia: '', fecha_salida: new Date().toISOString().split('T')[0],
+    mercancias_detalle: [{ mercancia_id: '', cantidad: 1, peso_kg: '', valor: '', moneda: 'MXN' }] 
   };
 
   const [formData, setFormData] = useState(formInicial);
+
+  // ==============================================================
+  // LÓGICA SAT: DETECTAR SI EL CAMIÓN LLEVA REMOLQUE
+  // ==============================================================
+  const unidadSeleccionadaObj = catalogos.unidades.find(u => u.id === formData.unidad_id);
+  const configVehicularSAT = unidadSeleccionadaObj?.configuracion_vehicular || '';
+  // Regla SAT: Si tiene 'T' (Tractocamión) o 'R' (Remolque), es articulado.
+  const esCamionArticulado = configVehicularSAT.includes('T') || configVehicularSAT.includes('R');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -67,7 +81,7 @@ export default function ViajesPage() {
 
   const generarIdCCP = () => crypto.randomUUID().toUpperCase();
 
-  const agregarFilaMercancia = () => { setFormData({ ...formData, mercancias_detalle: [...formData.mercancias_detalle, { mercancia_id: '', cantidad: 1, peso_kg: '' }] }); };
+  const agregarFilaMercancia = () => { setFormData({ ...formData, mercancias_detalle: [...formData.mercancias_detalle, { mercancia_id: '', cantidad: 1, peso_kg: '', valor: '', moneda: 'MXN' }] }); };
   const actualizarFilaMercancia = (index, campo, valor) => { const nuevasMercancias = [...formData.mercancias_detalle]; nuevasMercancias[index][campo] = valor; setFormData({ ...formData, mercancias_detalle: nuevasMercancias }); };
   const eliminarFilaMercancia = (index) => { const nuevasMercancias = formData.mercancias_detalle.filter((_, i) => i !== index); setFormData({ ...formData, mercancias_detalle: nuevasMercancias }); };
   const calcularPesoTotal = () => { return formData.mercancias_detalle.reduce((acc, curr) => acc + (Number(curr.peso_kg) || 0), 0); };
@@ -81,12 +95,12 @@ export default function ViajesPage() {
   const editarViaje = (viaje) => {
     setEditandoId(viaje.id);
     let detalle = viaje.mercancias_detalle || [];
-    if (detalle.length === 0 && viaje.mercancia_id) detalle = [{ mercancia_id: viaje.mercancia_id, cantidad: viaje.cantidad_mercancia || 1, peso_kg: viaje.peso_total_kg || '' }];
-    if (detalle.length === 0) detalle = [{ mercancia_id: '', cantidad: 1, peso_kg: '' }];
+    if (detalle.length === 0 && viaje.mercancia_id) detalle = [{ mercancia_id: viaje.mercancia_id, cantidad: viaje.cantidad_mercancia || 1, peso_kg: viaje.peso_total_kg || '', valor: '', moneda: 'MXN' }];
+    if (detalle.length === 0) detalle = [{ mercancia_id: '', cantidad: 1, peso_kg: '', valor: '', moneda: 'MXN' }];
 
     setFormData({
-      unidad_id: viaje.unidad_id || '', operador_id: viaje.operador_id || '', origen_id: viaje.origen_id || '', destino_id: viaje.destino_id || '',
-      cliente_id: viaje.cliente_id || '', monto_flete: viaje.monto_flete || '', distancia_km: viaje.distancia_km || '',
+      unidad_id: viaje.unidad_id || '', remolque_id: viaje.remolque_id || '', operador_id: viaje.operador_id || '', origen_id: viaje.origen_id || '', destino_id: viaje.destino_id || '',
+      cliente_id: viaje.cliente_id || '', monto_flete: viaje.monto_flete || '', distancia_km: viaje.distancia_km || '', referencia: viaje.referencia || '',
       fecha_salida: viaje.fecha_salida || new Date().toISOString().split('T')[0], mercancias_detalle: detalle
     });
     setMostrarModal(true);
@@ -119,9 +133,6 @@ export default function ViajesPage() {
     } catch (error) { alert("Error al cancelar: " + error.message); } finally { setLoading(false); }
   };
 
-  // ==========================================
-  // NUEVA FUNCIÓN: DESCARGAR XML DESDE FACTURAPI
-  // ==========================================
   const descargarXML = async (viajeId) => {
     setLoading(true);
     try {
@@ -130,8 +141,7 @@ export default function ViajesPage() {
 
       const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci";
       const response = await fetch(`https://www.facturapi.io/v2/invoices/${factura.facturapi_id}/xml`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${facturapiKey}` }
+        method: 'GET', headers: { 'Authorization': `Bearer ${facturapiKey}` }
       });
 
       if (!response.ok) throw new Error("No se pudo descargar el XML del SAT.");
@@ -144,28 +154,24 @@ export default function ViajesPage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { alert(err.message); } finally { setLoading(false); }
   };
 
   const traducirErrorFacturapi = (err) => {
     const errorStr = typeof err === 'object' ? JSON.stringify(err).toLowerCase() : String(err).toLowerCase();
     
-    if (errorStr.includes("legal_name") || errorStr.includes("nombre")) return "🚨 NOMBRE INCORRECTO: Escríbelo exactamente como en la Constancia Fiscal (sin S.A. de C.V.).";
+    if (errorStr.includes("legal_name") || errorStr.includes("nombre")) return "🚨 NOMBRE INCORRECTO: Escríbelo exactamente como en la Constancia Fiscal.";
     if (errorStr.includes("zip") || errorStr.includes("postal")) return "🚨 CÓDIGO POSTAL: El CP del cliente o ubicación no coincide con el RFC en el SAT.";
-    if (errorStr.includes("tax_system") || errorStr.includes("regimen")) return "🚨 RÉGIMEN FISCAL: El régimen del cliente no es correcto según su constancia.";
-    if (errorStr.includes("tax_id") || errorStr.includes("rfc")) return "🚨 RFC INVÁLIDO: Verifica que los RFC no tengan espacios o errores.";
-    if (errorStr.includes("configvehicular")) return "🚨 ERROR EN UNIDAD: La Configuración Vehicular debe ser una clave del SAT (Ej: T3S2) y no texto.";
-    if (errorStr.includes("placa")) return "🚨 PLACAS INVÁLIDAS: Revisa que las placas de la unidad no tengan guiones ni espacios.";
-    if (errorStr.includes("peso") || errorStr.includes("weight")) return "🚨 ERROR DE PESO: Verifica que el peso en la mercancía sea mayor a 0.";
+    if (errorStr.includes("tax_system") || errorStr.includes("regimen")) return "🚨 RÉGIMEN FISCAL: El régimen del cliente no es correcto.";
+    if (errorStr.includes("tax_id") || errorStr.includes("rfc")) return "🚨 RFC INVÁLIDO: Verifica que los RFC no tengan espacios.";
+    if (errorStr.includes("configvehicular")) return "🚨 ERROR EN UNIDAD: La Configuración Vehicular debe ser una clave del SAT (Ej: T3S2).";
+    if (errorStr.includes("placa")) return "🚨 PLACAS INVÁLIDAS: Revisa que las placas no tengan guiones ni espacios.";
+    if (errorStr.includes("peso") || errorStr.includes("weight")) return "🚨 ERROR DE PESO: Verifica que el peso sea mayor a 0.";
     if (errorStr.includes("unidadpeso") || errorStr.includes("claveunidad")) return "🚨 CLAVE DE EMBALAJE: Verifica el embalaje seleccionado.";
     if (errorStr.includes("permisosct") || errorStr.includes("numpermiso")) return "🚨 PERMISO SCT: Faltan datos del permiso SCT de la unidad.";
     if (errorStr.includes("fecha") || errorStr.includes("date")) return "🚨 FECHA INVÁLIDA: La fecha de salida no es válida.";
-    if (errorStr.includes("catalog key") || errorStr.includes("bienestransp")) return "🚨 CLAVE SAT INVÁLIDA: El código de la mercancía no existe. Recuerda que debe ser un número de 8 dígitos del catálogo oficial del SAT.";
-    if (errorStr.includes("ubicaciones") && errorStr.includes("estado")) return "🚨 ESTADO FALTANTE: Falta la clave del Estado (Ej: NLE, CMX, JAL) en la ubicación de Origen o Destino. Edítala en Configuración SAT.";
+    if (errorStr.includes("catalog key") || errorStr.includes("bienestransp")) return "🚨 CLAVE SAT INVÁLIDA: El código de la mercancía no existe en el SAT.";
+    if (errorStr.includes("ubicaciones") && errorStr.includes("estado")) return "🚨 ESTADO FALTANTE: Falta la clave del Estado (Ej: NLE) en Origen o Destino.";
 
     if (typeof err === 'object' && err.message) return `❌ El SAT rechazó el timbrado:\n${err.message}`;
     return `❌ Error técnico:\n${typeof err === 'object' ? JSON.stringify(err) : err}`;
@@ -188,25 +194,23 @@ export default function ViajesPage() {
       if (!viaje.destino?.estado) throw new Error(`Falta el Estado (Ej: TAM) en el destino: ${viaje.destino?.nombre_lugar}`);
 
       const u = viaje.unidades;
-      if (!u?.permiso_sict) throw new Error(`La unidad ${u?.numero_economico} NO tiene Tipo de Permiso SCT (Ej: TPAF01).`);
+      if (!u?.permiso_sict) throw new Error(`La unidad ${u?.numero_economico} NO tiene Tipo de Permiso SCT.`);
       if (!u?.num_permiso_sict) throw new Error(`La unidad ${u?.numero_economico} NO tiene Número de Permiso SCT.`);
-      if (!u?.configuracion_vehicular) throw new Error(`La unidad ${u?.numero_economico} NO tiene Configuración Vehicular (Ej: T3S2).`);
+      if (!u?.configuracion_vehicular) throw new Error(`La unidad ${u?.numero_economico} NO tiene Configuración Vehicular.`);
       if (!u?.placas) throw new Error(`La unidad ${u?.numero_economico} NO tiene Placas registradas.`);
-      if (!u?.anio_modelo) throw new Error(`La unidad ${u?.numero_economico} NO tiene Año Modelo.`);
-      if (!u?.aseguradora_rc) throw new Error(`La unidad ${u?.numero_economico} NO tiene Aseguradora registrada.`);
-      if (!u?.poliza_rc) throw new Error(`La unidad ${u?.numero_economico} NO tiene Póliza de Seguro registrada.`);
 
       const op = viaje.operadores;
       if (!op?.rfc) throw new Error(`El operador ${op?.nombre_completo} NO tiene RFC registrado.`);
       if (!op?.numero_licencia) throw new Error(`El operador ${op?.nombre_completo} NO tiene Número de Licencia.`);
 
+      // Armado de Mercancías
       const arregloMercanciasFacturapi = (viaje.mercancias_detalle || []).map((item, index) => {
         if (!item.clave_sat) throw new Error(`Falta la Clave SAT en el producto #${index + 1}`);
         if (!item.descripcion) throw new Error(`Falta la Descripción en el producto #${index + 1}`);
         if (!item.embalaje) throw new Error(`Falta el Embalaje (Clave Unidad) en el producto #${index + 1}`);
         if (!item.peso_kg || parseFloat(item.peso_kg) <= 0) throw new Error(`Falta el Peso (KG) en el producto #${index + 1}`);
 
-        return {
+        let mercancia = {
           BienesTransp: item.clave_sat,         
           Descripcion: item.descripcion,        
           Cantidad: parseFloat(item.cantidad),  
@@ -214,24 +218,57 @@ export default function ViajesPage() {
           PesoEnKg: parseFloat(item.peso_kg),
           MaterialPeligroso: item.material_peligroso ? "Sí" : "No"
         };
+
+        if (item.valor && parseFloat(item.valor) > 0) {
+          mercancia.ValorMercancia = parseFloat(item.valor);
+          mercancia.Moneda = item.moneda || "MXN";
+        }
+        return mercancia;
       });
+
+      // ==============================================================
+      // VALIDACIÓN ESTRICTA DEL SAT PARA REMOLQUES
+      // ==============================================================
+      const configSAT = u.configuracion_vehicular.trim().toUpperCase();
+      const requiereRemolqueSAT = configSAT.includes('T') || configSAT.includes('R');
+
+      const autotransporteObj = {
+        PermSCT: u.permiso_sict, 
+        NumPermisoSCT: u.num_permiso_sict,
+        IdentificacionVehicular: { 
+          ConfigVehicular: configSAT, 
+          PlacaVM: u.placas.replace(/[- ]/g, ''), 
+          AnioModeloVM: u.anio_modelo.toString(), 
+          PesoBrutoVehicular: parseFloat(u.peso_bruto_maximo || 30.00) 
+        },
+        Seguros: { AseguraRespCivil: u.aseguradora_rc, PolizaRespCivil: u.poliza_rc }
+      };
+
+      if (requiereRemolqueSAT) {
+        if (!viaje.remolques || !viaje.remolques.placas) {
+          throw new Error(`🛑 ERROR SAT: El camión ${u.numero_economico} tiene clave ${configSAT}. Es OBLIGATORIO que lleve un Remolque. Edita el viaje y asígnale uno.`);
+        }
+        autotransporteObj.Remolques = [
+          { 
+            SubTipoRem: (viaje.remolques.subtipo_remolque || "CTR02").trim().toUpperCase(), 
+            Placa: viaje.remolques.placas.replace(/[- ]/g, '') 
+          }
+        ];
+      }
 
       setLoading(true);
       
       const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci"; 
       const subtotal = Number((Number(viaje.monto_flete || 0) / 1.16).toFixed(2));
+      const descripcionServicio = viaje.referencia ? `Servicio de Flete Nacional - Ref: ${viaje.referencia}` : "Servicio de Flete Nacional";
 
       const invoiceData = {
         type: "I",
         customer: {
-          legal_name: viaje.clientes.nombre,
-          tax_id: viaje.clientes.rfc,
-          tax_system: viaje.clientes.regimen_fiscal, 
-          address: { zip: viaje.clientes.codigo_postal }
+          legal_name: viaje.clientes.nombre, tax_id: viaje.clientes.rfc, tax_system: viaje.clientes.regimen_fiscal, address: { zip: viaje.clientes.codigo_postal }
         },
         items: [{ 
-          quantity: 1, 
-          product: { description: "Servicio de Transporte Nacional", product_key: "78101802", price: subtotal, taxes: [{ type: "IVA", rate: 0.16 }, { type: "IVA", rate: 0.04, withholding: true }] } 
+          quantity: 1, product: { description: descripcionServicio, product_key: "78101802", price: subtotal, taxes: [{ type: "IVA", rate: 0.16 }, { type: "IVA", rate: 0.04, withholding: true }] } 
         }],
         payment_form: "99", payment_method: "PPD", use: viaje.clientes.uso_cfdi || "G03",
         complements: [{
@@ -244,11 +281,7 @@ export default function ViajesPage() {
             ],
             Mercancias: {
               PesoBrutoTotal: calcularPesoTotal(), UnidadPeso: "KGM", NumTotalMercancias: arregloMercanciasFacturapi.length, Mercancia: arregloMercanciasFacturapi, 
-              Autotransporte: {
-                PermSCT: u.permiso_sict, NumPermisoSCT: u.num_permiso_sict,
-                IdentificacionVehicular: { ConfigVehicular: u.configuracion_vehicular.trim().toUpperCase(), PlacaVM: u.placas.replace(/[- ]/g, ''), AnioModeloVM: u.anio_modelo.toString(), PesoBrutoVehicular: parseFloat(u.peso_bruto_maximo || 30.00) },
-                Seguros: { AseguraRespCivil: u.aseguradora_rc, PolizaRespCivil: u.poliza_rc }
-              }
+              Autotransporte: autotransporteObj
             },
             FiguraTransporte: [{ TipoFigura: "01", RFCFigura: op.rfc, NumLicencia: op.numero_licencia, NombreFigura: op.nombre_completo }]
           }
@@ -260,14 +293,8 @@ export default function ViajesPage() {
       
       if (response.ok) {
         await supabase.from('viajes').update({ estatus: 'Emitido (Timbrado)', folio_fiscal: res.uuid, id_ccp: res.complements?.[0]?.data?.IdCCP || "Generado", sello_emisor: res.stamp?.signature, sello_sat: res.stamp?.sat_signature, cadena_original: res.stamp?.complement_string }).eq('id', viaje.id);
-// Ahora sí, le pasamos los sellos también a la factura comercial
         await supabase.from('facturas').update({ 
-          estatus_pago: 'Pendiente', 
-          facturapi_id: res.id, 
-          folio_fiscal: res.uuid,
-          sello_emisor: res.stamp?.signature, 
-          sello_sat: res.stamp?.sat_signature, 
-          cadena_original: res.stamp?.complement_string
+          estatus_pago: 'Pendiente', facturapi_id: res.id, folio_fiscal: res.uuid, sello_emisor: res.stamp?.signature, sello_sat: res.stamp?.sat_signature, cadena_original: res.stamp?.complement_string
         }).eq('viaje_id', viaje.id);
         alert(`🎉 ¡CARTA PORTE TIMBRADA!\nUUID: ${res.uuid}`);
         obtenerViajes(sesion.user.id);
@@ -290,10 +317,24 @@ export default function ViajesPage() {
         return { ...item, clave_sat: cat?.clave_sat, descripcion: cat?.descripcion, embalaje: cat?.clave_embalaje || '4G', material_peligroso: cat?.material_peligroso || false };
       });
 
+      // Limpieza preventiva: Si no es camión articulado, no mandamos remolque a la BD
+      const remolqueLimpio = esCamionArticulado ? formData.remolque_id : null;
+
       const payloadComun = {
-        distancia_km: parseFloat(formData.distancia_km || 0), unidad_id: formData.unidad_id, operador_id: formData.operador_id, origen_id: formData.origen_id, destino_id: formData.destino_id,
-        mercancia_id: formData.mercancias_detalle[0].mercancia_id, mercancias_detalle: mercanciasEnriquecidas, peso_total_kg: calcularPesoTotal(), 
-        cliente_id: formData.cliente_id || null, monto_flete: parseFloat(formData.monto_flete || 0), fecha_salida: formData.fecha_salida, usuario_id: sesion.user.id
+        distancia_km: parseFloat(formData.distancia_km || 0), 
+        unidad_id: formData.unidad_id, 
+        remolque_id: remolqueLimpio, // <- Usamos la variable limpia
+        operador_id: formData.operador_id, 
+        origen_id: formData.origen_id, 
+        destino_id: formData.destino_id,
+        mercancia_id: formData.mercancias_detalle[0].mercancia_id, 
+        mercancias_detalle: mercanciasEnriquecidas, 
+        peso_total_kg: calcularPesoTotal(), 
+        cliente_id: formData.cliente_id || null, 
+        monto_flete: parseFloat(formData.monto_flete || 0), 
+        referencia: formData.referencia || '', 
+        fecha_salida: formData.fecha_salida, 
+        usuario_id: sesion.user.id
       };
 
       if (editandoId) {
@@ -302,21 +343,35 @@ export default function ViajesPage() {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
           const { data: facExistente } = await supabase.from('facturas').select('id').eq('viaje_id', editandoId).single();
           if (facExistente) {
-            await supabase.from('facturas').update({ cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0] }).eq('id', facExistente.id);
+            await supabase.from('facturas').update({ cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` }).eq('id', facExistente.id);
           } else {
-            await supabase.from('facturas').insert([{ usuario_id: sesion.user.id, viaje_id: editandoId, cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP` }]);
+            const { data: maxFactura } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
+            let nuevoFolioFactura = (maxFactura?.[0]?.folio_interno || 0) + 1;
+            const { data: viajeEditado } = await supabase.from('viajes').select('folio_interno').eq('id', editandoId).single();
+
+            await supabase.from('facturas').insert([{ 
+              usuario_id: sesion.user.id, viaje_id: editandoId, folio_viaje: viajeEditado?.folio_interno, folio_interno: nuevoFolioFactura,
+              cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
+            }]);
           }
         }
       } else {
         const nuevoIdCCP = generarIdCCP();
         const { data: maxFolioData } = await supabase.from('viajes').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
-        let nuevoFolio = (maxFolioData?.[0]?.folio_interno || 0) + 1;
+        let nuevoFolioViaje = (maxFolioData?.[0]?.folio_interno || 0) + 1;
 
-        const { data: nuevoViaje } = await supabase.from('viajes').insert([{ ...payloadComun, folio_interno: nuevoFolio, id_ccp: nuevoIdCCP, estatus: 'Borrador' }]).select().single();
+        const { data: nuevoViaje, error: errorViaje } = await supabase.from('viajes').insert([{ ...payloadComun, folio_interno: nuevoFolioViaje, id_ccp: nuevoIdCCP, estatus: 'Borrador' }]).select().single();
+        if (errorViaje) throw errorViaje;
 
         if (formData.monto_flete > 0 && formData.cliente_id) {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
-          await supabase.from('facturas').insert([{ usuario_id: sesion.user.id, viaje_id: nuevoViaje.id, cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP` }]);
+          const { data: maxFacturaData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
+          let nuevoFolioFactura = (maxFacturaData?.[0]?.folio_interno || 0) + 1;
+
+          await supabase.from('facturas').insert([{ 
+            usuario_id: sesion.user.id, viaje_id: nuevoViaje.id, folio_viaje: nuevoFolioViaje, folio_interno: nuevoFolioFactura,
+            cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
+          }]);
         }
       }
 
@@ -324,118 +379,264 @@ export default function ViajesPage() {
     } catch (err) { alert("Error: " + err.message); } finally { setLoading(false); }
   };
 
+  // Resto de Helpers UI (getBadgeColor, filtrarPorPeriodo...) se mantienen igual
+  const getBadgeColor = (estatus) => {
+    switch(estatus) {
+      case 'Emitido (Timbrado)': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+      case 'Cancelado': return 'bg-red-500/10 text-red-400 border-red-500/20';
+      default: return 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20';
+    }
+  };
+
+  const filtrarPorPeriodo = (viajeDate) => {
+    if (!filtroActivo) return true; 
+    if (!viajeDate) return false;
+    if (!fechaInicio && !fechaFin) return true;
+
+    const fViaje = new Date(viajeDate + 'T12:00:00'); 
+    const fInicio = fechaInicio ? new Date(fechaInicio + 'T12:00:00') : null;
+    const fFin = fechaFin ? new Date(fechaFin + 'T12:00:00') : null;
+
+    if (fInicio && fViaje < fInicio) return false;
+    if (fFin && fViaje > fFin) return false;
+
+    return true;
+  };
+
+  const viajesDelPeriodo = viajes.filter(v => filtrarPorPeriodo(v.fecha_salida));
+
+  const getFiltrosArray = () => {
+    return [
+      { id: 'Todos', label: 'Todos', count: viajesDelPeriodo.length },
+      { id: 'Borrador', label: 'Borradores', count: viajesDelPeriodo.filter(v => v.estatus === 'Borrador').length },
+      { id: 'Emitido (Timbrado)', label: 'Timbrados', count: viajesDelPeriodo.filter(v => v.estatus === 'Emitido (Timbrado)').length },
+      { id: 'Cancelado', label: 'Cancelados', count: viajesDelPeriodo.filter(v => v.estatus === 'Cancelado').length },
+    ];
+  };
+
+  const viajesFiltrados = viajesDelPeriodo.filter(v => filtroEstatus === 'Todos' || v.estatus === filtroEstatus);
+
   if (!sesion) return null;
 
   return (
     <div className="flex bg-slate-950 min-h-screen text-slate-200">
       <Sidebar />
       <main className="flex-1 p-8 overflow-y-auto">
-        <div className="max-w-6xl mx-auto">
-          <header className="mb-10 flex justify-between items-end">
+        <div className="max-w-7xl mx-auto">
+          
+          <header className="mb-8 flex justify-between items-end">
             <div>
               <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">Logística <span className="text-blue-500">Operativa</span></h1>
+              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">Histórico de Despachos y Carta Porte</p>
             </div>
-            <button onClick={() => setMostrarModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg">
-              <PlusCircle size={16} /> Programar Viaje
+            <button onClick={() => setMostrarModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg shadow-blue-900/20 transition-all">
+              <PlusCircle size={16} /> Crear Despacho
             </button>
           </header>
 
-          <div className="grid grid-cols-1 gap-4">
-            {viajes.map((v) => (
-                <div key={v.id} className={`bg-slate-900/40 border border-slate-800 p-6 rounded-[2rem] hover:border-blue-500/30 transition-all group ${v.estatus === 'Cancelado' ? 'opacity-60 grayscale' : ''}`}>
-                  <div className="flex items-center gap-8">
-                    <div className="min-w-[100px]">
-                      <p className="text-[8px] font-black text-slate-600 uppercase mb-1">Folio</p>
-                      <h4 className={`text-xl font-black font-mono leading-none ${v.estatus === 'Cancelado' ? 'text-red-500 line-through' : 'text-white'}`}>#{String(v.folio_interno).padStart(4, '0')}</h4>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <span className="text-[11px] font-black text-white uppercase italic">{v.origen?.nombre_lugar}</span>
-                        <Navigation size={12} className="text-blue-500 rotate-90" />
-                        <span className="text-[11px] font-black text-white uppercase italic">{v.destino?.nombre_lugar}</span>
-                      </div>
-                      <p className="text-[9px] text-slate-500 font-bold uppercase mt-1">
-                        {v.mercancias_detalle ? `${v.mercancias_detalle.length} Productos` : '1 Producto'} | {v.peso_total_kg} KG TOTAL
-                        {v.estatus === 'Cancelado' && <span className="ml-3 text-red-500 font-black">❌ CANCELADO</span>}
-                      </p>
-                    </div>
-                    
-                    {/* ==============================================
-                        LÓGICA VISUAL DE BOTONES (AQUÍ ESTÁ LA MAGIA)
-                        ============================================== */}
-                    <div className="flex gap-2 ml-auto opacity-0 group-hover:opacity-100 transition-all">
-                      
-                      {/* 🟢 SI ESTÁ EN BORRADOR: Timbrar, Editar, Eliminar */}
-                      {v.estatus === 'Borrador' && (
-                        <>
-                          <button onClick={() => timbrarCartaPorte(v)} disabled={loading} title="Timbrar Carta Porte" className="p-3 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-500/20 rounded-xl transition-colors">
-                            {loading ? <Loader2 size={18} className="animate-spin"/> : <ShieldCheck size={18}/>}
-                          </button>
-                          <button onClick={() => editarViaje(v)} title="Editar Viaje" className="p-3 bg-orange-500/10 text-orange-400 hover:bg-orange-500 hover:text-white rounded-xl transition-colors">
-                            <Edit2 size={18}/>
-                          </button>
-                          <button onClick={() => eliminarViaje(v.id)} title="Eliminar Viaje" className="p-3 bg-slate-800 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-colors">
-                            <Trash2 size={18}/>
-                          </button>
-                        </>
-                      )}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 border-b border-slate-800 pb-4">
+            
+            <div className="flex gap-2 overflow-x-auto scrollbar-hide w-full sm:w-auto">
+              {getFiltrosArray().map(f => (
+                <button key={f.id} onClick={() => setFiltroEstatus(f.id)} 
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border
+                  ${filtroEstatus === f.id ? 'bg-slate-800 text-white border-slate-700 shadow-md' : 'bg-slate-900/50 text-slate-500 border-transparent hover:bg-slate-800/50'}`}>
+                  {f.label} <span className={`px-2 py-0.5 rounded-full text-[9px] ${filtroEstatus === f.id ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>{f.count}</span>
+                </button>
+              ))}
+            </div>
 
-                      {/* 🔵 SI ESTÁ TIMBRADO: Factura, XML, Carta Porte, Cancelar */}
-                      {v.estatus === 'Emitido (Timbrado)' && (
-                        <>
-                          <button onClick={() => router.push(`/facturas?viaje_id=${v.id}`)} title="Ver Factura (PDF Comercial)" className="p-3 bg-green-600/10 text-green-500 hover:bg-green-600 hover:text-white rounded-xl transition-colors">
-                            <Receipt size={18}/>
-                          </button>
-                        
-                          <button onClick={() => generarPDFCartaPorte(v, perfilEmisor)} title="Descargar Carta Porte (PDF SCT)" className="p-3 bg-blue-900 text-white-300 hover:bg-blue-400 hover:text-white rounded-xl transition-colors">
-                            <FileText size={18}/>
-                          </button>
-                          
-                          <button onClick={() => cancelarViaje(v)} disabled={loading} title="Cancelar Carta Porte en el SAT" className="p-3 bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white border border-red-500/20 rounded-xl transition-colors">
-                             <XCircle size={18}/>
-                          </button>
-                        </>
-                      )}
+            <div className="relative shrink-0">
+              <button 
+                onClick={() => setMostrarFiltro(!mostrarFiltro)}
+                className={`flex items-center gap-3 border px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
+                  ${filtroActivo ? 'bg-blue-600/10 border-blue-500/30 text-blue-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}`}
+              >
+                <Calendar size={14} className={filtroActivo ? 'text-blue-500' : 'text-slate-500'} />
+                {filtroActivo ? 'Filtro Activo' : 'Periodo'}
+                <ChevronDown size={14} className={`transition-transform duration-200 ${mostrarFiltro ? 'rotate-180' : ''}`} />
+              </button>
 
-                      {/* 🔴 SI ESTÁ CANCELADO: Solo ver PDF y Eliminar de la base de datos */}
-                      {v.estatus === 'Cancelado' && (
-                        <>
-                          <button onClick={() => generarPDFCartaPorte(v, perfilEmisor)} title="Ver Carta Porte Cancelada" className="p-3 bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white rounded-xl transition-colors">
-                            <FileText size={18}/>
-                          </button>
-                          <button onClick={() => eliminarViaje(v.id)} title="Eliminar Registro Permanente" className="p-3 bg-slate-800 text-slate-400 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-colors">
-                            <Trash2 size={18}/>
-                          </button>
-                        </>
-                      )}
-
-                    </div>
+              {mostrarFiltro && (
+                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-20 p-5">
+                  <div className="mb-4">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Desde (Fecha Viaje)</label>
+                    <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none focus:border-blue-500" />
                   </div>
+                  <div className="mb-6">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Hasta (Fecha Viaje)</label>
+                    <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none focus:border-blue-500" />
+                  </div>
+                  <button onClick={() => { setFiltroActivo(true); setMostrarFiltro(false); }}
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-black text-[10px] uppercase tracking-widest py-3 rounded-xl transition-colors mb-2">
+                    Aplicar Filtro
+                  </button>
+                  {filtroActivo && (
+                    <button onClick={() => { setFiltroActivo(false); setFechaInicio(''); setFechaFin(''); setMostrarFiltro(false); }}
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 font-black text-[10px] uppercase tracking-widest py-2.5 rounded-xl transition-colors">
+                      Limpiar
+                    </button>
+                  )}
                 </div>
-            ))}
+              )}
+            </div>
+
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[13px]">
+                <thead>
+                  <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-[13px] font-semibold uppercase tracking-wider">
+                    <th className="p-4 pl-8 font-normal">Folio</th>
+                    <th className="p-4 font-normal">Cliente / Referencia</th>
+                    <th className="p-4 font-normal">Ruta Operativa</th>
+                    <th className="p-4 font-normal">Unidad y Remolque</th>
+                    <th className="p-4 font-normal">Carga</th>
+                    <th className="p-4 pr-8 text-right font-normal">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {viajesFiltrados.map((v) => (
+                    <tr key={v.id} className={`hover:bg-slate-800/30 transition-colors group ${v.estatus === 'Cancelado' ? 'opacity-50 grayscale' : ''}`}>
+                      
+                      <td className="p-4 pl-8 align-middle">
+                        <div className="flex flex-col items-start gap-1">
+                          <span className="text-[14px] text-white font-mono font-medium">#V-{String(v.folio_interno).padStart(4, '0')}</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded border uppercase tracking-widest text-[9px] items-center gap-1 ${getBadgeColor(v.estatus)}`}>
+                            {v.estatus}
+                          </span>
+                          <span className="text-[11px] text-slate-500 mt-0.5">{v.fecha_salida?.slice(0, 10)}</span>
+                        </div>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-white truncate max-w-[180px]" title={v.clientes?.nombre}>{v.clientes?.nombre || 'Sin Cliente'}</span>
+                          {v.referencia ? (
+                             <span className="text-blue-400 text-[11px] font-mono mt-1 px-2 py-0.5 bg-blue-900/20 rounded inline-block w-fit">PO: {v.referencia}</span>
+                          ) : (
+                             v.clientes?.rfc && <span className="text-slate-500 text-[11px] font-mono">RFC: {v.clientes.rfc}</span>
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="p-4 align-middle max-w-[220px]">
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 text-white truncate" title={v.origen?.nombre_lugar}>
+                            <div className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"/> <span className="truncate">{v.origen?.nombre_lugar || 'Sin Origen'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-white truncate" title={v.destino?.nombre_lugar}>
+                            <div className="w-1.5 h-1.5 rounded-full bg-purple-500 shrink-0"/> <span className="truncate">{v.destino?.nombre_lugar || 'Sin Destino'}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-white uppercase truncate max-w-[180px]" title={v.operadores?.nombre_completo}>{v.operadores?.nombre_completo || 'Sin Operador'}</span>
+                          <span className="text-slate-500 font-mono flex items-center gap-1.5 text-[11px]">
+                            <Truck size={10} className="text-slate-600"/> 
+                            {v.unidades?.numero_economico || 'N/A'} {v.remolques ? `+ Caja ${v.remolques.placas}` : ''}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-slate-300">{v.peso_total_kg} KG</span>
+                          <span className="text-slate-500 uppercase text-[11px]">{v.mercancias_detalle ? v.mercancias_detalle.length : 1} Productos</span>
+                        </div>
+                      </td>
+
+                      <td className="p-4 pr-8 align-middle">
+                        <div className="flex items-center justify-end gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
+                          
+                          {v.estatus === 'Borrador' && (
+                            <>
+                              <button onClick={() => eliminarViaje(v.id)} title="Eliminar Viaje" className="p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-colors"><Trash2 size={16}/></button>
+                              <button onClick={() => editarViaje(v)} title="Editar Viaje" className="p-2 text-slate-400 hover:bg-orange-500/10 hover:text-orange-400 rounded-lg transition-colors"><Edit2 size={16}/></button>
+                              <button onClick={() => timbrarCartaPorte(v)} disabled={loading} className="px-3 py-1.5 ml-2 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-500/20 rounded-lg uppercase tracking-widest text-[10px] flex items-center gap-1.5 transition-colors">
+                                {loading ? <Loader2 size={14} className="animate-spin"/> : <ShieldCheck size={14}/>} Timbrar
+                              </button>
+                            </>
+                          )}
+
+                          {v.estatus === 'Emitido (Timbrado)' && (
+                            <>
+                              <button onClick={() => cancelarViaje(v)} disabled={loading} title="Cancelar Carta Porte en el SAT" className="p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-colors mr-2"><XCircle size={16}/></button>
+                              <button onClick={() => descargarXML(v.id)} title="Descargar XML" className="p-2 bg-purple-600/10 text-purple-400 hover:bg-purple-600 hover:text-white rounded-lg transition-colors"><FileCode size={16}/></button>
+                              <button onClick={() => router.push(`/facturas?viaje_id=${v.id}`)} title="Ver Factura (Ingreso)" className="p-2 bg-emerald-600/10 text-emerald-500 hover:bg-emerald-600 hover:text-white rounded-lg transition-colors"><Receipt size={16}/></button>
+                              <button onClick={() => generarPDFCartaPorte(v, perfilEmisor)} title="Descargar Carta Porte" className="p-2 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white rounded-lg transition-colors"><FileText size={16}/></button>
+                            </>
+                          )}
+
+                          {v.estatus === 'Cancelado' && (
+                            <>
+                              <button onClick={() => eliminarViaje(v.id)} title="Eliminar Definitivamente" className="p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-colors mr-2"><Trash2 size={16}/></button>
+                              <button onClick={() => generarPDFCartaPorte(v, perfilEmisor)} title="Descargar PDF Cancelado" className="p-2 bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white rounded-lg transition-colors"><FileText size={16}/></button>
+                            </>
+                          )}
+
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  
+                  {viajesFiltrados.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="py-16 text-center">
+                        <Navigation size={32} className="mx-auto text-slate-700 mb-3" />
+                        <p className="text-slate-500 uppercase tracking-widest text-sm">No hay viajes en este periodo o categoría</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {mostrarModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" />
-              <div className="relative bg-slate-900 border border-slate-800 w-full max-w-4xl rounded-[2.5rem] p-10 shadow-2xl overflow-y-auto max-h-[90vh]">
+              <div className="relative bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-[2.5rem] p-10 shadow-2xl overflow-y-auto max-h-[90vh]">
                 <button onClick={cerrarModal} className="absolute top-8 right-8 text-slate-500 hover:text-white"><X size={24} /></button>
                 <h2 className="text-2xl font-black text-white italic uppercase mb-8">{editandoId ? 'Editar' : 'Programar'} <span className="text-blue-500">Operación</span></h2>
                 
                 <form onSubmit={registrarViaje} className="space-y-6">
-                  {/* SECCIÓN 1: TRACTOR Y OPERADOR */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.unidad_id} onChange={e => setFormData({...formData, unidad_id: e.target.value})}>
-                      <option value="">Tractocamión...</option>
-                      {catalogos.unidades.map(u => <option key={u.id} value={u.id}>{u.numero_economico}</option>)}
+                  
+                  {/* SECCIÓN 1: TRACTOR Y REMOLQUE (LÓGICA INTELIGENTE) */}
+                  <div className={`grid gap-4 ${esCamionArticulado ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                    <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" 
+                      value={formData.unidad_id} 
+                      onChange={e => {
+                        setFormData({...formData, unidad_id: e.target.value});
+                        // Si cambiamos de tracto a rabón, limpiamos el remolque para que no se envíe por error
+                        const unidadElegida = catalogos.unidades.find(u => u.id === e.target.value);
+                        if (unidadElegida && !unidadElegida.configuracion_vehicular.includes('T') && !unidadElegida.configuracion_vehicular.includes('R')) {
+                           setFormData(prev => ({...prev, unidad_id: e.target.value, remolque_id: ''}));
+                        }
+                      }}>
+                      <option value="">Tractocamión / Unidad...</option>
+                      {catalogos.unidades.map(u => <option key={u.id} value={u.id}>{u.numero_economico} ({u.configuracion_vehicular})</option>)}
                     </select>
+
+                    {esCamionArticulado && (
+                      <select required className="bg-slate-950 border border-orange-500/50 p-4 rounded-xl text-sm text-white" value={formData.remolque_id} onChange={e => setFormData({...formData, remolque_id: e.target.value})}>
+                        <option value="">Remolque (OBLIGATORIO)...</option>
+                        {catalogos.remolques.map(r => <option key={r.id} value={r.id}>{r.placas} - {r.subtipo_remolque || 'Caja'}</option>)}
+                      </select>
+                    )}
+
                     <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.operador_id} onChange={e => setFormData({...formData, operador_id: e.target.value})}>
                       <option value="">Operador...</option>
                       {catalogos.operadores.map(o => <option key={o.id} value={o.id}>{o.nombre_completo}</option>)}
                     </select>
                   </div>
 
-                  {/* SECCIÓN 2: ORIGEN Y DESTINO */}
+                  {/* EL RESTO DEL FORMULARIO SIGUE EXACTAMENTE IGUAL... */}
                   <div className="grid grid-cols-5 gap-4">
                     <select required className="col-span-2 w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.origen_id} onChange={e => setFormData({...formData, origen_id: e.target.value})}>
                       <option value="">Origen...</option>
@@ -445,43 +646,51 @@ export default function ViajesPage() {
                       <option value="">Destino...</option>
                       {catalogos.ubicaciones.map(ub => <option key={ub.id} value={ub.id}>{ub.nombre_lugar}</option>)}
                     </select>
-                    <input required type="number" placeholder="KM Total" className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-bold text-center" value={formData.distancia_km} onChange={e => setFormData({...formData, distancia_km: e.target.value})} />
+                    <input required type="number" placeholder="KM Total" className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white text-center" value={formData.distancia_km} onChange={e => setFormData({...formData, distancia_km: e.target.value})} />
                   </div>
 
-                  {/* SECCIÓN 3: LISTA DINÁMICA DE MERCANCÍAS */}
                   <div className="p-6 border border-blue-500/20 bg-blue-900/10 rounded-2xl space-y-4">
                     <div className="flex justify-between items-center mb-2">
-                      <p className="text-[10px] font-black text-blue-400 uppercase flex items-center gap-2"><Package size={14}/> Detalle de Carga</p>
-                      <button type="button" onClick={agregarFilaMercancia} className="text-[9px] bg-blue-600 text-white px-3 py-1.5 rounded-lg uppercase font-bold hover:bg-blue-500 transition-colors">+ Agregar Producto</button>
+                      <p className="text-[10px] text-blue-400 uppercase flex items-center gap-2"><Package size={14}/> Detalle de Carga y Seguros</p>
+                      <button type="button" onClick={agregarFilaMercancia} className="text-[9px] bg-blue-600 text-white px-3 py-1.5 rounded-lg uppercase hover:bg-blue-500 transition-colors">+ Agregar Producto</button>
                     </div>
 
                     {formData.mercancias_detalle.map((item, index) => (
                       <div key={index} className="grid grid-cols-12 gap-3 items-center bg-slate-950 p-3 rounded-xl border border-slate-800">
-                        <select required className="col-span-6 bg-transparent text-sm text-white outline-none" 
+                        <select required className="col-span-4 bg-slate-950 text-sm text-white outline-none" 
                           value={item.mercancia_id} onChange={e => actualizarFilaMercancia(index, 'mercancia_id', e.target.value)}>
                           <option value="">Seleccionar Producto...</option>
                           {catalogos.mercancias.map(m => <option key={m.id} value={m.id}>{m.descripcion}</option>)}
                         </select>
                         <input required type="number" placeholder="Cant." className="col-span-2 bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center focus:border-blue-500" 
                           value={item.cantidad} onChange={e => actualizarFilaMercancia(index, 'cantidad', e.target.value)} />
-                        <input required type="number" step="0.01" placeholder="Peso (KG)" className="col-span-3 bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center focus:border-blue-500" 
+                        <input required type="number" step="0.01" placeholder="Peso (KG)" className="col-span-2 bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center focus:border-blue-500" 
                           value={item.peso_kg} onChange={e => actualizarFilaMercancia(index, 'peso_kg', e.target.value)} />
+                        
+                        <input type="number" step="0.01" placeholder="Valor ($)" className="col-span-2 bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center focus:border-blue-500" 
+                          value={item.valor} onChange={e => actualizarFilaMercancia(index, 'valor', e.target.value)} title="Valor de la mercancía (Opcional)" />
+                        <select className="col-span-1 bg-slate-900 border border-slate-700 p-2 rounded-lg text-xs text-white text-center" 
+                          value={item.moneda} onChange={e => actualizarFilaMercancia(index, 'moneda', e.target.value)}>
+                          <option value="MXN">MXN</option>
+                          <option value="USD">USD</option>
+                        </select>
+
                         <button type="button" onClick={() => eliminarFilaMercancia(index)} disabled={formData.mercancias_detalle.length === 1} className="col-span-1 text-slate-500 hover:text-red-500 flex justify-center disabled:opacity-30 transition-colors"><Trash2 size={16}/></button>
                       </div>
                     ))}
-                    <div className="text-right mt-2"><p className="text-[10px] text-slate-400 uppercase font-bold">Peso Total: <span className="text-white text-xs">{calcularPesoTotal().toLocaleString('es-MX', {minimumFractionDigits: 2})} KG</span></p></div>
+                    <div className="text-right mt-2"><p className="text-[10px] text-slate-400 uppercase">Peso Total: <span className="text-white text-xs">{calcularPesoTotal().toLocaleString('es-MX', {minimumFractionDigits: 2})} KG</span></p></div>
                   </div>
 
-                  {/* SECCIÓN 4: FACTURACIÓN */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <select required className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.cliente_id} onChange={e => setFormData({...formData, cliente_id: e.target.value})}>
+                  <div className="grid grid-cols-3 gap-4">
+                    <select required className="col-span-1 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.cliente_id} onChange={e => setFormData({...formData, cliente_id: e.target.value})}>
                       <option value="">Cliente Factura...</option>
                       {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                     </select>
-                    <input type="number" placeholder="Monto Flete ($)" className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.monto_flete} onChange={e => setFormData({...formData, monto_flete: e.target.value})} />
+                    <input type="text" placeholder="Orden de Compra / Referencia (Opcional)" className="col-span-1 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.referencia} onChange={e => setFormData({...formData, referencia: e.target.value})} />
+                    <input type="number" placeholder="Monto Flete ($)" className="col-span-1 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.monto_flete} onChange={e => setFormData({...formData, monto_flete: e.target.value})} />
                   </div>
 
-                  <button type="submit" disabled={loading} className={`w-full py-5 rounded-2xl font-black uppercase text-[10px] tracking-widest transition-all ${editandoId ? 'bg-orange-500 hover:bg-orange-400' : 'bg-blue-600 hover:bg-blue-500'} text-white`}>
+                  <button type="submit" disabled={loading} className={`w-full py-5 rounded-2xl uppercase text-sm tracking-widest transition-all ${editandoId ? 'bg-orange-500 hover:bg-orange-400' : 'bg-blue-600 hover:bg-blue-500'} text-white`}>
                     {loading ? "Procesando..." : (editandoId ? "Guardar Cambios" : "Confirmar Viaje")}
                   </button>
                 </form>

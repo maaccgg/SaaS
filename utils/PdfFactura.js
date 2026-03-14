@@ -1,7 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Función ayudante para unir las cajitas de dirección
 const formatDireccion = (obj) => {
   if (!obj) return 'No especificada';
   const parts = [];
@@ -25,15 +24,10 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
   let etiquetaEstatus = factura.estatus_pago === 'Pagado' ? 'PAGADO' : (esVencida ? 'ATRASADO' : 'PENDIENTE');
   let colorEstatus = factura.estatus_pago === 'Pagado' ? [34, 197, 94] : (esVencida ? [239, 68, 68] : [249, 115, 22]);
 
-  // ==========================================
-  // LÓGICA DE HORA EXACTA (EXTRAÍDA DEL SAT)
-  // ==========================================
   let fechaImpresion = `${factura.fecha_viaje || 'Borrador'}`;
 
-  // Extraemos la fecha y hora oficial directamente dentro de la Cadena Original del SAT
   if (factura.cadena_original && factura.cadena_original.includes('T')) {
     const partesCadena = factura.cadena_original.split('|');
-    // Buscamos el fragmento que parezca una fecha (Ej: 2024-03-12T14:35:10)
     const fechaTimbre = partesCadena.find(p => p.includes('T') && p.includes('-') && p.includes(':'));
     
     if (fechaTimbre) {
@@ -43,15 +37,12 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
       fechaImpresion = `${dia} a las ${hora} hrs`;
     }
   } else if (factura.created_at) {
-    // Respaldo por si es un borrador sin timbrar
     const fechaCreacion = new Date(factura.created_at);
     const horaFormateada = fechaCreacion.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     fechaImpresion = `${factura.fecha_viaje || fechaCreacion.toLocaleDateString('es-MX')} a las ${horaFormateada}`;
   }
 
-  // ==============================
   // CABECERA Y LOGO
-  // ==============================
   if (perfilEmisor?.logo_base64) {
     const formato = perfilEmisor.logo_base64.includes('image/png') ? 'PNG' : 'JPEG';
     doc.addImage(perfilEmisor.logo_base64, formato, 14, 15, 35, 20);
@@ -61,9 +52,7 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
     doc.text("SIN\nLOGO", 31.5, 24, { align: 'center' });
   }
 
-  // ==============================
-  // EMISOR (Dirección concatenada)
-  // ==============================
+  // EMISOR
   doc.setTextColor(0, 0, 0); 
   doc.setFontSize(12); doc.setFont("helvetica", "bold");
   doc.text(`${perfilEmisor?.razon_social || 'EMISOR SIN REGISTRAR'}`, 55, 19);
@@ -80,12 +69,14 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
   doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor(255, 255, 255); 
   doc.text(`FACTURA CFDI 4.0 - ${etiquetaEstatus}`, 165.5, 20, { align: 'center' });
 
+  // DETALLES DE FACTURA Y TRAZABILIDAD
   doc.setTextColor(0); doc.setFontSize(8);
   autoTable(doc, {
     startY: 22, margin: { left: 135, right: 14 },
     body: [
-      ['Serie y Folio:', `F - ${factura.id.toString().slice(0, 5)}`],
-      ['Fecha Emisión:', fechaImpresion], // <-- Aquí se imprime la hora oficial del SAT
+      ['Serie y Folio:', `F - ${String(factura.folio_interno || 'S/N').padStart(4, '0')}`], // <-- FOLIO INTERNO CORRECTO
+      ['Viaje Amparado:', factura.folio_viaje ? `V - ${String(factura.folio_viaje).padStart(4, '0')}` : 'Libre'], // <-- TRAZABILIDAD
+      ['Fecha Emisión:', fechaImpresion],
       ['Uso CFDI:', clienteData?.uso_cfdi || 'G03 - Gastos en general']
     ],
     theme: 'plain', styles: { fontSize: 7, cellPadding: 1 }, 
@@ -95,9 +86,7 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
   doc.setDrawColor(0); doc.setLineWidth(0.5);
   doc.line(14, Math.max(42, 32 + (lineasDirEmisor.length * 3.5)), 196, Math.max(42, 32 + (lineasDirEmisor.length * 3.5))); 
 
-  // ==============================
-  // RECEPTOR (Dirección concatenada)
-  // ==============================
+  // RECEPTOR
   let yReceptor = Math.max(48, 38 + (lineasDirEmisor.length * 3.5));
   doc.setFontSize(9); doc.setFont("helvetica", "bold"); 
   doc.text("RECEPTOR (CLIENTE):", 14, yReceptor);
@@ -124,7 +113,6 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
 
   let startYTabla = yReceptor + 14 + (lineasDirReceptor.length * 3.5) + 5;
 
-  // Formateamos el subtotal para que SIEMPRE lleve la coma de los miles
   const subtotalFormateado = subtotal.toLocaleString('es-MX', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
   autoTable(doc, {
@@ -245,5 +233,5 @@ export const generarFacturaPDF = async (factura, clienteData, perfilEmisor) => {
   doc.setFontSize(7); doc.setTextColor(100);
   doc.text("Este documento es una representación impresa de un CFDI 4.0 de Ingreso.", 105, 285, { align: 'center' });
 
-  doc.save(`Factura_${factura.cliente}_${factura.folio_fiscal?.slice(0,5) || 'Borrador'}.pdf`);
+  doc.save(`Factura_F${String(factura.folio_interno || '0000').padStart(4, '0')}.pdf`);
 };

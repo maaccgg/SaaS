@@ -9,10 +9,8 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   // ==========================================
   let fechaEmisionCompleta = `${viaje.fecha_salida || 'Borrador'}`;
 
-  // Truco: Buscamos la fecha y hora oficial directamente dentro de la Cadena Original del SAT
   if (viaje.cadena_original && viaje.cadena_original.includes('T')) {
     const partesCadena = viaje.cadena_original.split('|');
-    // Buscamos el fragmento que parezca una fecha (Ej: 2024-03-12T14:35:10)
     const fechaTimbre = partesCadena.find(p => p.includes('T') && p.includes('-') && p.includes(':'));
     
     if (fechaTimbre) {
@@ -51,9 +49,10 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   autoTable(doc, {
     startY: 22, margin: { left: 135, right: 14 },
     body: [
-      ['Folio Interno:', `#${String(viaje.folio_interno).padStart(5, '0')}`],
-      ['Fecha Emisión:', fechaEmisionCompleta], // <-- Usamos la hora extraída del SAT
-      ['Folio Fiscal:', viaje.folio_fiscal?.slice(0,13) || 'POR ASIGNAR']
+      ['Folio Interno:', `V - ${String(viaje.folio_interno).padStart(4, '0')}`],
+      ['Fecha Emisión:', fechaEmisionCompleta],
+      ['Folio Fiscal:', viaje.folio_fiscal?.slice(0,13) || 'POR ASIGNAR'],
+      ['Orden Compra:', viaje.referencia || '---'] // <-- NUEVA REFERENCIA PO
     ],
     theme: 'plain', styles: { fontSize: 7, cellPadding: 1 },
     columnStyles: { 0: { fontStyle: 'bold' }, 1: { halign: 'right' } }
@@ -69,9 +68,6 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   doc.text(`RFC: ${viaje.clientes?.rfc || 'XAXX010101000'}`, 14, 58);
   doc.text(`Uso CFDI: ${viaje.clientes?.uso_cfdi || 'G03'} | Régimen: ${viaje.clientes?.regimen_fiscal || '601'}`, 14, 62);
 
-  // ==========================================
-  // Función ayudante para unir direcciones
-  // ==========================================
   const formatDireccion = (obj) => {
     if (!obj) return '---';
     const parts = [];
@@ -96,11 +92,9 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   doc.setFont("helvetica", "bold");
   doc.text(`Ubicación: ${viaje.origen?.nombre_lugar || 'Domicilio Conocido'}`, 14, yLog);
   doc.setFont("helvetica", "normal");
-  
   const dirO = doc.splitTextToSize(`Domicilio: ${formatDireccion(viaje.origen)}`, 85);
   doc.text(dirO, 14, yLog + 4);
   const saltoO = dirO.length * 4;
-  
   doc.text(`C.P.: ${viaje.origen?.codigo_postal || '00000'} | Estado: ${viaje.origen?.estado || 'NLE'}`, 14, yLog + saltoO + 4);
   doc.text(`RFC Remitente: ${viaje.origen?.rfc_ubicacion || perfilEmisor?.rfc || 'XEXX010101000'}`, 14, yLog + saltoO + 8);
   
@@ -108,11 +102,9 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   doc.setFont("helvetica", "bold");
   doc.text(`Ubicación: ${viaje.destino?.nombre_lugar || 'Domicilio Conocido'}`, 110, yLog);
   doc.setFont("helvetica", "normal");
-  
   const dirD = doc.splitTextToSize(`Domicilio: ${formatDireccion(viaje.destino)}`, 85);
   doc.text(dirD, 110, yLog + 4);
   const saltoD = dirD.length * 4;
-  
   doc.text(`C.P.: ${viaje.destino?.codigo_postal || '00000'} | Estado: ${viaje.destino?.estado || 'TAM'}`, 110, yLog + saltoD + 4);
   doc.text(`RFC Destinatario: ${viaje.destino?.rfc_ubicacion || viaje.clientes?.rfc || 'XAXX010101000'}`, 110, yLog + saltoD + 8);
 
@@ -121,30 +113,42 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   // ==========================================
   // 4. TABLAS (MERCANCÍAS Y TRANSPORTE)
   // ==========================================
-  const filasMercancias = (viaje.mercancias_detalle || []).map(item => [
-    item.cantidad,
-    item.embalaje || 'KGM',
-    item.clave_sat,
-    item.descripcion,
-    item.peso_kg
-  ]);
+  
+  // A. Construir filas de mercancía incluyendo el Valor Declarado
+  const filasMercancias = (viaje.mercancias_detalle || []).map(item => {
+    const valorDeclarado = (item.valor && item.valor > 0) ? `$${Number(item.valor).toLocaleString('es-MX')} ${item.moneda || 'MXN'}` : '---';
+    return [
+      item.cantidad,
+      item.embalaje || 'KGM',
+      item.clave_sat,
+      item.descripcion,
+      `${item.peso_kg} kg`,
+      valorDeclarado // <-- NUEVA COLUMNA DE VALOR
+    ];
+  });
 
   if (filasMercancias.length === 0 && viaje.mercancias) {
-    filasMercancias.push([viaje.cantidad_mercancia || 1, 'E48', viaje.mercancias?.clave_sat, viaje.mercancias?.descripcion, viaje.peso_total_kg]);
+    filasMercancias.push([viaje.cantidad_mercancia || 1, 'E48', viaje.mercancias?.clave_sat, viaje.mercancias?.descripcion, `${viaje.peso_total_kg} kg`, '---']);
   }
 
   autoTable(doc, {
     startY: startTablas,
-    head: [['Cant.', 'Embalaje/Unidad', 'Clave SAT', 'Descripción del Bien', 'Peso (KG)']],
+    head: [['Cant.', 'Embalaje', 'Clave SAT', 'Descripción del Bien', 'Peso (KG)', 'Valor Decl.']], // <-- NUEVO ENCABEZADO
     body: filasMercancias,
-    theme: 'grid', styles: { fontSize: 7 }, headStyles: { fillColor: [40, 40, 40] }
+    theme: 'grid', styles: { fontSize: 7 }, headStyles: { fillColor: [40, 40, 40] },
+    columnStyles: { 5: { halign: 'right' } } // Alinear valor a la derecha
   });
+
+  // B. Construir la lógica inteligente del Remolque para el PDF
+  const configSAT = viaje.unidades?.configuracion_vehicular || '';
+  const esArticulado = configSAT.includes('T') || configSAT.includes('R');
+  const textoRemolque = esArticulado && viaje.remolques ? `Caja/Remolque: ${viaje.remolques.placas}` : 'Remolque: No Aplica (Unidad Unitaria)';
 
   autoTable(doc, {
     startY: doc.lastAutoTable.finalY + 5,
     head: [['VEHÍCULO / PLACAS', 'PERMISO SCT', 'SEGURO RC Y PÓLIZA', 'OPERADOR / LICENCIA']],
     body: [[
-      `${viaje.unidades?.configuracion_vehicular || '---'}\n${viaje.unidades?.placas || 'N/A'}\nRemolque: ${viaje.remolques?.placas || 'N/A'}`,
+      `${configSAT}\nPlacas: ${viaje.unidades?.placas || 'N/A'}\n${textoRemolque}`, // <-- IMPRESIÓN INTELIGENTE
       `${viaje.unidades?.permiso_sict || 'TPAF01'}\nNúm: ${viaje.unidades?.num_permiso_sict || 'S/N'}`,
       `${viaje.unidades?.aseguradora_rc || 'N/A'}\nPol: ${viaje.unidades?.poliza_rc || 'N/A'}`,
       `${viaje.operadores?.nombre_completo || 'N/A'}\nLic: ${viaje.operadores?.numero_licencia || 'N/A'}`
@@ -156,7 +160,6 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   // 5. PIE FISCAL Y CÓDIGO QR
   // ==========================================
   let footerY = 225;
-  
   if (doc.lastAutoTable.finalY > 215) {
      doc.addPage();
      footerY = 20;
@@ -219,5 +222,5 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   doc.setFont("helvetica", "bold"); doc.text("FIRMA DE CONFORMIDAD DEL CLIENTE / REMITENTE", 105, yLegal + 30, { align: 'center' });
   doc.line(65, yLegal + 25, 145, yLegal + 25);
 
-  doc.save(`CartaPorte_${viaje.folio_interno}.pdf`);
+  doc.save(`CartaPorte_${viaje.folio_interno || '0000'}.pdf`);
 };
