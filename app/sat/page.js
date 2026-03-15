@@ -231,7 +231,6 @@ export default function SATConfigPage() {
                   );
                 })}
 
-                {/* Resto de renderizado de catálogos (clientes, remolques, ubicaciones, mercancias) permanecen igual... */}
                 {activeTab === 'clientes' && clientes.map(cl => (
                   <div key={cl.id} className="bg-slate-900 border border-slate-800 p-6 rounded-[2rem] group hover:border-blue-500/40 transition-all">
                     <div className="flex justify-between items-start">
@@ -290,8 +289,163 @@ export default function SATConfigPage() {
               </div>
             </div>
           ) : (
-            // CONTENIDO EMISOR FISCAL (Se mantiene igual al original que te pasé)
-            <div className="animate-in fade-in"><p className="text-slate-500">Formulario del Emisor Fiscal aquí...</p></div>
+            // =========================================================
+            // PESTAÑA EMISOR FISCAL RESTAURADA
+            // =========================================================
+            <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-2">
+              
+              {/* FILA 1: PERFIL Y LOGOTIPO */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                
+                {/* Tarjeta 1: Datos de Facturación */}
+                <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col">
+                  <Building2 className="text-blue-500 mb-5" size={32} />
+                  <h3 className="text-xl font-black text-white italic uppercase mb-1">Perfil del <span className="text-blue-500">Transportista</span></h3>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-6">Datos de Facturación</p>
+                  
+                  <div className="grid grid-cols-1 gap-5">
+                    <div>
+                      <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">Razón Social</label>
+                      <input className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white outline-none focus:border-blue-500 uppercase" 
+                        value={perfilFiscal.razon_social} onChange={e => setPerfilFiscal({...perfilFiscal, razon_social: e.target.value.toUpperCase()})} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">RFC</label>
+                        <input className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white uppercase font-mono" 
+                          value={perfilFiscal.rfc} onChange={e => setPerfilFiscal({...perfilFiscal, rfc: e.target.value})} />
+                      </div>
+                      <div>
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">CP Fiscal</label>
+                        <input className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white" 
+                          value={perfilFiscal.codigo_postal} onChange={e => setPerfilFiscal({...perfilFiscal, codigo_postal: e.target.value})} />
+                      </div>
+                    </div>
+                    
+                    <div className="pt-4 border-t border-slate-800 mt-2">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Dirección Comercial</p>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">Calle y Número</label>
+                          <input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" 
+                            placeholder="Ej. Av. Universidad 123" value={perfilFiscal.calle_numero} onChange={e => setPerfilFiscal({...perfilFiscal, calle_numero: e.target.value})} />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">Colonia</label>
+                          <input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" 
+                            placeholder="Ej. Centro" value={perfilFiscal.colonia} onChange={e => setPerfilFiscal({...perfilFiscal, colonia: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">Municipio</label>
+                          <input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" 
+                            placeholder="Ej. Monterrey" value={perfilFiscal.municipio} onChange={e => setPerfilFiscal({...perfilFiscal, municipio: e.target.value})} />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block">Estado</label>
+                          <input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" 
+                            placeholder="Ej. Nuevo León" value={perfilFiscal.estado} onChange={e => setPerfilFiscal({...perfilFiscal, estado: e.target.value})} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tarjeta 2: LOGOTIPO */}
+                <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] flex flex-col">
+                  <ImageIcon className="text-orange-500 mb-5" size={32} />
+                  <h3 className="text-xl font-black text-white italic uppercase mb-1">Imagen <span className="text-orange-500">Corporativa</span></h3>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-8">Logotipo para Facturas y Carta Porte</p>
+                  
+                  <div className="flex flex-col items-center justify-center gap-8 flex-1">
+                    <div className="w-56 h-56 bg-slate-950 rounded-[2rem] border-2 border-dashed border-slate-700 flex items-center justify-center overflow-hidden p-4 relative group">
+                      {perfilFiscal.logo_base64 ? (
+                        <img src={perfilFiscal.logo_base64} alt="Logo Empresa" className="w-full h-full object-contain" />
+                      ) : (
+                        <div className="text-center">
+                          <ImageIcon className="text-slate-700 mx-auto mb-2" size={32} />
+                          <span className="text-xs text-slate-600 font-black uppercase tracking-widest">Sin Logotipo</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div className="w-full">
+                      <label className="w-full flex flex-col items-center justify-center p-4 rounded-2xl border border-slate-800 bg-slate-950 hover:bg-slate-800 cursor-pointer transition-all">
+                        <span className="text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                          <ImageIcon size={14} /> Seleccionar Nueva Imagen
+                        </span>
+                        <span className="text-[8px] text-slate-500 mt-1 uppercase">PNG o JPG (Max 1MB)</span>
+                        <input type="file" accept="image/png, image/jpeg" className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            if (file.size > 1024 * 1024) return alert("El logo debe pesar menos de 1MB");
+                            
+                            const reader = new FileReader();
+                            reader.onloadend = () => setPerfilFiscal({...perfilFiscal, logo_base64: reader.result});
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* FILA 2: SELLOS DIGITALES */}
+              <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] relative overflow-hidden">
+                <FileKey className="text-purple-500 mb-5" size={32} />
+                <h3 className="text-xl font-black text-white italic uppercase mb-1">Sellos <span className="text-purple-500">Digitales (CSD)</span></h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mb-6">Requisito para Timbrar en Producción</p>
+                
+                {perfilFiscal.tiene_csd ? (
+                  <div className="bg-green-500/10 border border-green-500/30 p-6 rounded-2xl text-center max-w-lg mx-auto">
+                    <CheckCircle className="text-green-500 mx-auto mb-3" size={32} />
+                    <h4 className="text-white font-bold uppercase text-sm mb-1">Sellos Activos</h4>
+                    <p className="text-[10px] text-slate-400">Tu cuenta está lista para timbrar ante el SAT.</p>
+                    <button type="button" onClick={() => setPerfilFiscal({...perfilFiscal, tiene_csd: false})} className="mt-4 text-[9px] text-blue-400 uppercase font-bold hover:text-white">Actualizar Sellos</button>
+                  </div>
+                ) : (
+                  <form onSubmit={subirSellosCSD} className="space-y-4 max-w-2xl">
+                    <div className="bg-blue-900/20 border border-blue-500/20 p-3 rounded-xl flex items-start gap-3">
+                      <AlertTriangle size={14} className="text-blue-500 shrink-0 mt-0.5" />
+                      <p className="text-[9px] text-blue-200/80 leading-relaxed">Asegúrate de subir tus archivos de <strong>Facturación (CSD)</strong>. El SAT rechazará los timbres si subes los de e.firma (FIEL).</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl">
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-1 block">Archivo .CER</label>
+                        <input type="file" accept=".cer" required onChange={e => setCerFile(e.target.files[0])} className="w-full text-[10px] text-slate-300 file:mr-4 file:py-1.5 file:px-4 file:rounded-xl file:border-0 file:text-[9px] file:font-bold file:uppercase file:bg-slate-800 file:text-white hover:file:bg-slate-700" />
+                      </div>
+                      
+                      <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl">
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-1 block">Archivo .KEY</label>
+                        <input type="file" accept=".key" required onChange={e => setKeyFile(e.target.files[0])} className="w-full text-[10px] text-slate-300 file:mr-4 file:py-1.5 file:px-4 file:rounded-xl file:border-0 file:text-[9px] file:font-bold file:uppercase file:bg-slate-800 file:text-white hover:file:bg-slate-700" />
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="text-[9px] font-black text-slate-500 uppercase ml-1 mb-2 block flex items-center gap-1"><Lock size={10}/> Contraseña del Sello</label>
+                        <input type="password" required value={csdPassword} onChange={e => setCsdPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 p-3.5 rounded-2xl text-sm text-white outline-none focus:border-purple-500" placeholder="••••••••" />
+                      </div>
+                    </div>
+
+                    <button type="submit" disabled={isUploadingCSD} className={`w-full py-4 rounded-xl font-black uppercase text-[10px] tracking-widest shadow-xl flex justify-center items-center gap-2 transition-all ${isUploadingCSD ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-500'}`}>
+                      <Lock size={14}/> {isUploadingCSD ? "Validando en el SAT..." : "Vincular Sellos CSD"}
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              {/* BOTÓN GIGANTE */}
+              <div className="mt-4">
+                <button type="button" onClick={guardarPerfilFiscal} disabled={loading} 
+                  className={`w-full py-6 rounded-[2rem] font-black uppercase text-sm tracking-[0.2em] shadow-2xl flex justify-center items-center gap-3 transition-all 
+                  ${loading ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-500'}`}>
+                  <Save size={20}/> {loading ? "Sincronizando..." : "Guardar Datos Maestros"}
+                </button>
+              </div>
+
+            </div>
           )}
 
           {/* ============================================================================== */}
@@ -301,10 +455,8 @@ export default function SATConfigPage() {
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md" onClick={cerrarModal} />
               
-              {/* Lógica dinámica de ancho: Expediente = max-w-4xl, Catálogo Simple = max-w-2xl */}
               <div className={`relative bg-slate-900 border border-slate-800 w-full ${activeTab === 'operadores' ? 'max-w-4xl' : 'max-w-2xl'} flex flex-col max-h-[90vh] rounded-[2.5rem] shadow-2xl animate-in zoom-in-95 overflow-hidden`}>
                 
-                {/* HEADER DEL MODAL */}
                 <div className={`p-8 border-b border-slate-800 flex justify-between items-center bg-slate-900 shrink-0 ${activeTab !== 'operadores' ? 'pb-6' : ''}`}>
                   <div>
                     <h2 className="text-2xl font-black text-white italic uppercase leading-none">
@@ -315,7 +467,6 @@ export default function SATConfigPage() {
                   <button onClick={cerrarModal} className="text-slate-500 hover:text-white bg-slate-950 p-2 rounded-full"><X size={20} /></button>
                 </div>
 
-                {/* TABS INTERNOS SOLO PARA OPERADORES */}
                 {activeTab === 'operadores' && (
                   <div className="flex px-8 border-b border-slate-800 bg-slate-950 shrink-0">
                     <button onClick={() => setTabOperador('ficha')} className={`py-4 px-6 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 flex items-center gap-2 ${tabOperador === 'ficha' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
@@ -327,24 +478,116 @@ export default function SATConfigPage() {
                   </div>
                 )}
 
-                {/* CONTENEDOR SCROLLABLE */}
                 <div className="p-8 overflow-y-auto bg-slate-900 flex-1">
                   
-                  {/* FORMULARIOS ESTÁNDAR (Clientes, Remolques, Ubicaciones, Mercancías) */}
+                  {/* FORMULARIOS ESTÁNDAR RESTAURADOS */}
                   {activeTab !== 'operadores' && (
                     <form onSubmit={guardarRegistro} className="space-y-6">
-                      {/* Aquí van los forms de Clientes, Remolques, etc. que ya tenías */}
-                      <p className="text-slate-500 text-sm">Carga de formulario {activeTab}...</p>
+                      
+                      {activeTab === 'clientes' && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="col-span-2 bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl mb-2"><p className="text-[10px] text-yellow-500 font-bold uppercase tracking-wider flex items-center gap-2">⚠️ Regla CFDI 4.0 del SAT</p><p className="text-[9px] text-yellow-400/80 mt-1">El Nombre y Código Postal deben capturarse <strong>exactamente</strong> como aparecen en la Constancia de Situación Fiscal. Omite el "S.A. DE C.V.".</p></div>
+                          
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Razón Social del Cliente</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-bold uppercase" value={formDataCl.nombre} onChange={e => setFormDataCl({...formDataCl, nombre: e.target.value.toUpperCase()})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">RFC</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white uppercase font-mono" value={formDataCl.rfc} onChange={e => setFormDataCl({...formDataCl, rfc: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">CP Fiscal</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formDataCl.codigo_postal} onChange={e => setFormDataCl({...formDataCl, codigo_postal: e.target.value})} /></div>
+                          
+                          <div className="col-span-2 mt-2"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">Domicilio del Cliente</p></div>
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Calle y Número</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataCl.calle_numero} onChange={e => setFormDataCl({...formDataCl, calle_numero: e.target.value})} /></div>
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Colonia</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataCl.colonia} onChange={e => setFormDataCl({...formDataCl, colonia: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Municipio</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataCl.municipio} onChange={e => setFormDataCl({...formDataCl, municipio: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Estado</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataCl.estado} onChange={e => setFormDataCl({...formDataCl, estado: e.target.value})} /></div>
+                          
+                          <div className="col-span-2 mt-2"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">Datos Fiscales</p></div>
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Régimen Fiscal</label><select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-bold" value={formDataCl.regimen_fiscal} onChange={e => setFormDataCl({...formDataCl, regimen_fiscal: e.target.value})}><option value="601">601 - General de Ley Personas Morales</option><option value="612">612 - Personas Físicas con Actividad Empresarial</option><option value="626">626 - Régimen Simplificado de Confianza (RESICO)</option></select></div>
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Uso de CFDI</label><select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-bold" value={formDataCl.uso_cfdi} onChange={e => setFormDataCl({...formDataCl, uso_cfdi: e.target.value})}><option value="G03">G03 - Gastos en general</option><option value="G01">G01 - Adquisición de mercancías</option><option value="S01">S01 - Sin efectos fiscales</option></select></div>
+                        </div>
+                      )}
+
+                      {activeTab === 'remolques' && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Número Económico (Alias)</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white font-bold" placeholder="Ej: CAJA-01" value={formDataRe.numero_economico} onChange={e => setFormDataRe({...formDataRe, numero_economico: e.target.value})} /></div>
+                          
+                          <div className="col-span-2 flex gap-2">
+                            <select className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white w-1/3" value={formDataRe.tipo_placa} onChange={e => setFormDataRe({...formDataRe, tipo_placa: e.target.value})}>
+                              <option value="Federal">Federal</option>
+                              <option value="Estatal">Estatal</option>
+                            </select>
+                            <input required className="flex-1 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white uppercase font-mono" placeholder="Placas (Ej: 456ABC)" value={formDataRe.placas} onChange={e => setFormDataRe({...formDataRe, placas: e.target.value})} />
+                          </div>
+
+                          <div className="col-span-2">
+                            <label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Tipo de Remolque (Catálogo SAT 3.1)</label>
+                            <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formDataRe.subtipo_remolque} onChange={e => setFormDataRe({...formDataRe, subtipo_remolque: e.target.value})}>
+                              <option value="CTR01">CTR01 - Caja Seca (Camión / Rabón)</option>
+                              <option value="CTR02">CTR02 - Caja Seca (Tráiler / Full)</option>
+                              <option value="CTR03">CTR03 - Caja Refrigerada</option>
+                              <option value="CTR04">CTR04 - Plataforma</option>
+                              <option value="CTR05">CTR05 - Cama Baja</option>
+                              <option value="CTR06">CTR06 - Chasis Portacontenedor</option>
+                              <option value="CTR08">CTR08 - Tolva</option>
+                              <option value="CTR10">CTR10 - Tanque (Pipa)</option>
+                              <option value="CTR12">CTR12 - Góndola / Madrina</option>
+                            </select>
+                          </div>
+                        </div>
+                      )}
+
+                      {activeTab === 'ubicaciones' && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="col-span-2 bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl mb-2">
+                            <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider flex items-center gap-2">⚠️ Dato Obligatorio</p>
+                            <p className="text-[9px] text-blue-400/80 mt-1">El <strong>RFC y el Estado (3 letras)</strong> son indispensables. Si no los registras, el SAT no te permitirá timbrar la Carta Porte.</p>
+                          </div>
+                          
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Nombre / Alias del Lugar</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" placeholder="Ej: CEDIS Monterrey" value={formDataUb.nombre_lugar} onChange={e => setFormDataUb({...formDataUb, nombre_lugar: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-blue-500 uppercase block mb-2 ml-1">Código Postal</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formDataUb.codigo_postal} onChange={e => setFormDataUb({...formDataUb, codigo_postal: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">RFC Ubicación</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white uppercase" value={formDataUb.rfc_ubicacion} onChange={e => setFormDataUb({...formDataUb, rfc_ubicacion: e.target.value})} /></div>
+                          
+                          <div className="col-span-2 mt-2"><p className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">Domicilio de la Ubicación</p></div>
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Calle y Número</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataUb.calle_numero} onChange={e => setFormDataUb({...formDataUb, calle_numero: e.target.value})} /></div>
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Colonia</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataUb.colonia} onChange={e => setFormDataUb({...formDataUb, colonia: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Municipio</label><input className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white" value={formDataUb.municipio} onChange={e => setFormDataUb({...formDataUb, municipio: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-blue-500 uppercase block mb-2 ml-1">Estado (Clave SAT Ej: NLE)</label><input required className="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white uppercase" placeholder="Ej: NLE, JAL, CMX, TAM" value={formDataUb.estado} onChange={e => setFormDataUb({...formDataUb, estado: e.target.value.toUpperCase().slice(0,3)})} /></div>
+                        </div>
+                      )}
+
+                      {activeTab === 'mercancias' && (
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="col-span-2"><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Descripción del Bien</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formDataMe.descripcion} onChange={e => setFormDataMe({...formDataMe, descripcion: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-blue-500 uppercase block mb-2 ml-1">Clave SAT (Producto)</label><input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" placeholder="Ej: 31181701" value={formDataMe.clave_sat} onChange={e => setFormDataMe({...formDataMe, clave_sat: e.target.value})} /></div>
+                          <div><label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Peso Estimado (KG)</label><input required type="number" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formDataMe.peso_unitario_kg} onChange={e => setFormDataMe({...formDataMe, peso_unitario_kg: e.target.value})} /></div>
+                          <div className="col-span-2 mt-2 pt-4 border-t border-slate-800">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Configuración de Envío</p>
+                            <div className="grid grid-cols-2 gap-4 items-center">
+                              <div>
+                                <label className="text-[9px] font-black text-slate-500 uppercase block mb-2 ml-1">Embalaje (Clave Unidad)</label>
+                                <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formDataMe.clave_embalaje} onChange={e => setFormDataMe({...formDataMe, clave_embalaje: e.target.value})}>
+                                  <option value="4G">4G - Cajas de Cartón</option><option value="XG">XG - Tarima (Pallet)</option><option value="H87">H87 - Pieza (Suelto)</option><option value="E48">E48 - Unidad de servicio</option><option value="KGM">KGM - Kilogramo</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center justify-center bg-slate-950 border border-slate-800 p-4 rounded-xl h-full">
+                                <label className="flex items-center gap-3 cursor-pointer w-full justify-center">
+                                  <input type="checkbox" className="w-5 h-5 accent-red-500 rounded bg-slate-950 border-slate-800 cursor-pointer" checked={formDataMe.material_peligroso} onChange={e => setFormDataMe({...formDataMe, material_peligroso: e.target.checked})} />
+                                  <span className={`text-[10px] font-black uppercase tracking-widest ${formDataMe.material_peligroso ? 'text-red-500' : 'text-slate-500'}`}>¿Material Peligroso?</span>
+                                </label>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      
+                      <button type="submit" disabled={loading} className={`w-full py-4 rounded-xl font-black uppercase text-[11px] tracking-widest shadow-xl transition-all ${loading ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-500'}`}>
+                        {loading ? "Procesando..." : "Guardar Registro"}
+                      </button>
                     </form>
                   )}
 
-                  {/* VISTA DEL EXPEDIENTE DE OPERADORES */}
+                  {/* EXPEDIENTE DE OPERADORES */}
                   {activeTab === 'operadores' && (
                     <>
-                      {/* PESTAÑA 1: FICHA DE IDENTIDAD */}
                       {tabOperador === 'ficha' && (
                         <form onSubmit={guardarRegistro} className="space-y-6">
-                          {/* BLOQUE IDENTIDAD */}
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 bg-slate-950 rounded-2xl border border-slate-800">
                             <div className="col-span-2 md:col-span-4 text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2">Identidad y Fiscales</div>
                             
@@ -364,7 +607,6 @@ export default function SATConfigPage() {
                             </div>
                           </div>
 
-                          {/* BLOQUE LICENCIA */}
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-6 bg-blue-900/10 rounded-2xl border border-blue-500/20">
                             <div className="col-span-2 md:col-span-4 text-[9px] font-black text-blue-400 uppercase tracking-widest mb-2 flex items-center gap-2"><ShieldCheck size={14} /> Permisos y Vigencias</div>
                             
@@ -385,7 +627,6 @@ export default function SATConfigPage() {
                         </form>
                       )}
 
-                      {/* PESTAÑA 2: DOCUMENTOS DIGITALES (Punto Ciego mitigado para el futuro) */}
                       {tabOperador === 'documentos' && (
                         <div className="space-y-6 animate-in fade-in">
                           <div className="bg-purple-500/10 border border-purple-500/30 p-6 rounded-2xl text-center">

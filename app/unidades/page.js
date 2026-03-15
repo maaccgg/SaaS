@@ -151,53 +151,87 @@ export default function UnidadesPage() {
               <PlusCircle size={16} /> Alta de Unidad
             </button>
           </header>
+<div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {unidades.length === 0 && <p className="text-slate-500 text-sm">No hay unidades registradas.</p>}
-            
-            {unidades.map((u) => {
-              const vigSeguro = verificarVigencia(u.vencimiento_seguro);
-              const vigSct = u.tipo_placa === 'Estatal' ? { texto: 'No Aplica', color: 'text-slate-400', bg: 'bg-slate-900 border-slate-800' } : verificarVigencia(u.vencimiento_sct);
+  {unidades.length === 0 && <p className="text-slate-500 text-sm">No hay unidades registradas.</p>}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[13px]">
+                <thead>
+                  <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-[13px] font-semibold uppercase tracking-wider">
+                    <th className="p-4 pl-8 font-normal">Identificación</th>
+                    <th className="p-4 font-normal">Configuración</th>
+                    <th className="p-4 font-normal">Seguro RC</th>
+                    <th className="p-4 font-normal">Permiso SCT</th>
+                    <th className="p-4 pr-8 text-right font-normal">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {unidades.length === 0 && (
+                    <tr>
+                      <td colSpan="5" className="py-16 text-center">
+                        <Truck size={32} className="mx-auto text-slate-700 mb-3" />
+                        <p className="text-slate-500 uppercase tracking-widest text-sm">No hay unidades registradas</p>
+                      </td>
+                    </tr>
+                  )}
+                  
+                  {unidades.map((u) => {
+                    const vigSeguro = verificarVigencia(u.vencimiento_seguro);
+                    const vigSct = u.tipo_placa === 'Estatal' 
+                      ? { texto: 'No Aplica', color: 'text-slate-400', bg: 'bg-slate-900 border-slate-800' } 
+                      : verificarVigencia(u.vencimiento_sct);
 
-              return (
-                <div key={u.id} className="bg-slate-900 border border-slate-800 p-6 rounded-[2rem] group hover:border-blue-500/30 transition-all shadow-xl">
-                  <div className="flex justify-between items-start mb-6">
-                    <div className="bg-slate-950 p-4 rounded-2xl text-blue-500 border border-slate-800">
-                      <Truck size={24} />
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => abrirExpediente(u)} className="px-4 py-2 bg-blue-600/10 text-blue-400 hover:bg-blue-600 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors flex items-center gap-1">
-                        <Wrench size={12}/> Expediente
-                      </button>
-                      <button onClick={() => eliminarUnidad(u.id)} className="p-2 text-slate-600 hover:text-red-500 bg-slate-950 rounded-xl transition-colors"><Trash2 size={14}/></button>
-                    </div>
-                  </div>
+                    return (
+                      <tr key={u.id} className="hover:bg-slate-800/30 transition-colors group">
+                        
+                        <td className="p-4 pl-8 align-middle">
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="text-[14px] text-white font-mono font-medium">ECO: {u.numero_economico}</span>
+                            <span className="text-[11px] text-slate-500">Placas: <span className="text-slate-300">{u.placas}</span></span>
+                            <span className={`inline-flex px-2 py-0.5 rounded border uppercase tracking-widest text-[9px] items-center gap-1 ${u.tipo_placa === 'Estatal' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-blue-500/10 text-blue-400 border-blue-500/20'}`}>
+                              {u.tipo_placa || 'Federal'}
+                            </span>
+                          </div>
+                        </td>
 
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="text-xl font-black text-white uppercase italic">ECO: {u.numero_economico}</h3>
-                      <p className="text-[11px] text-slate-400 font-mono uppercase tracking-widest mt-1">
-                        <span className="text-slate-500">Placas:</span> {u.placas} 
-                        <span className={`text-[8px] px-1.5 py-0.5 rounded ml-2 ${u.tipo_placa === 'Estatal' ? 'bg-orange-500/10 text-orange-400' : 'bg-blue-500/10 text-blue-400'}`}>{u.tipo_placa || 'Federal'}</span>
-                      </p>
-                    </div>
+                        <td className="p-4 align-middle">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-white truncate">{u.configuracion_vehicular || 'N/A'}</span>
+                            <span className="text-slate-500 text-[11px]">Mod: {u.anio_modelo || 'N/A'}</span>
+                          </div>
+                        </td>
 
-                    <div className="grid grid-cols-2 gap-3 border-t border-slate-800 pt-4">
-                      <div className={`p-2 rounded-xl border flex flex-col items-center justify-center text-center ${vigSeguro.bg}`}>
-                        <ShieldCheck size={14} className={`mb-1 ${vigSeguro.color}`} />
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Seguro RC</span>
-                        <span className={`text-[9px] font-bold uppercase ${vigSeguro.color}`}>{vigSeguro.texto}</span>
-                      </div>
-                      <div className={`p-2 rounded-xl border flex flex-col items-center justify-center text-center ${vigSct.bg}`}>
-                        <FileText size={14} className={`mb-1 ${vigSct.color}`} />
-                        <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Permiso SCT</span>
-                        <span className={`text-[9px] font-bold uppercase ${vigSct.color}`}>{vigSct.texto}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+                        <td className="p-4 align-middle">
+                          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${vigSeguro.bg}`}>
+                            <ShieldCheck size={14} className={vigSeguro.color} />
+                            <span className={`text-[10px] font-bold uppercase tracking-widest ${vigSeguro.color}`}>{vigSeguro.texto}</span>
+                          </div>
+                        </td>
+
+                        <td className="p-4 align-middle">
+                          <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border ${vigSct.bg}`}>
+                            <FileText size={14} className={vigSct.color} />
+                            <span className={`text-[10px] font-bold uppercase tracking-widest ${vigSct.color}`}>{vigSct.texto}</span>
+                          </div>
+                        </td>
+
+                        <td className="p-4 pr-8 align-middle text-right">
+                          <div className="flex items-center justify-end gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => abrirExpediente(u)} title="Ver Expediente" className="px-3 py-1.5 bg-blue-600/10 text-blue-500 hover:bg-blue-600 hover:text-white border border-blue-500/20 rounded-lg uppercase tracking-widest text-[10px] flex items-center gap-1.5 transition-colors">
+                              <Wrench size={14}/> Expediente
+                            </button>
+                            <button onClick={() => eliminarUnidad(u.id)} title="Eliminar Unidad" className="p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-500 rounded-lg transition-colors ml-2">
+                              <Trash2 size={16}/>
+                            </button>
+                          </div>
+                        </td>
+                        
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {mostrarModal && (
