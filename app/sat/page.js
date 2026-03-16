@@ -8,6 +8,37 @@ import {
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 
+// Función para extraer el número de serie de un archivo .cer del SAT
+const extraerSerieCER = async (archivoCer) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      const view = new Uint8Array(e.target.result);
+      let hex = '';
+      for (let i = 0; i < view.length; i++) {
+        hex += view[i].toString(16).padStart(2, '0');
+      }
+      
+      const match = hex.match(/(3[0-9]){20}/);
+      
+      if (match) {
+        const serialHex = match[0];
+        let serial = '';
+        for (let i = 0; i < serialHex.length; i += 2) {
+          serial += String.fromCharCode(parseInt(serialHex.substring(i, i + 2), 16));
+        }
+        resolve(serial);
+      } else {
+        reject(new Error('No se detectó un número de serie válido del SAT en este archivo.'));
+      }
+    };
+    
+    reader.onerror = () => reject(new Error('Error al leer el archivo .cer'));
+    reader.readAsArrayBuffer(archivoCer);
+  });
+};
+
 export default function SATConfigPage() {
   const [sesion, setSesion] = useState(null);
   const [activeTab, setActiveTab] = useState('operadores');
@@ -25,7 +56,7 @@ export default function SATConfigPage() {
   const [clientes, setClientes] = useState([]); 
   const [perfilFiscal, setPerfilFiscal] = useState({ 
     razon_social: '', rfc: '', regimen_fiscal: '601', codigo_postal: '', tiene_csd: false, logo_base64: '',
-    calle_numero: '', colonia: '', municipio: '', estado: '' 
+    calle_numero: '', colonia: '', municipio: '', estado: '', no_certificado: '' 
   });
 
   const [cerFile, setCerFile] = useState(null);
@@ -67,7 +98,8 @@ export default function SATConfigPage() {
             calle_numero: data.calle_numero || '',
             colonia: data.colonia || '',
             municipio: data.municipio || '',
-            estado: data.estado || ''
+            estado: data.estado || '',
+            no_certificado: data.no_certificado || ''
           });
         }
       } else {
@@ -106,6 +138,27 @@ export default function SATConfigPage() {
     const { error } = await supabase.from('perfil_emisor').upsert({ ...perfilFiscal, usuario_id: sesion.user.id, rfc: perfilFiscal.rfc.toUpperCase(), updated_at: new Date() });
     if (error) alert(error.message); else alert("✅ Configuración Fiscal Guardada.");
     setLoading(false);
+  };
+
+  // NUEVA FUNCIÓN: INTERCEPTA EL ARCHIVO .CER Y EXTRAE EL NÚMERO
+  const handleCargaCer = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setCerFile(file); // Guardamos el archivo para el submit
+
+    try {
+      const numeroCertificado = await extraerSerieCER(file);
+      setPerfilFiscal(prev => ({ 
+        ...prev, 
+        no_certificado: numeroCertificado 
+      }));
+      alert(`✅ Certificado leído correctamente.\nNo. de Serie: ${numeroCertificado}`);
+    } catch (error) {
+      alert(`❌ ${error.message}`);
+      e.target.value = null; // Limpiamos el input
+      setCerFile(null);
+    }
   };
 
   const subirSellosCSD = async (e) => {
@@ -415,7 +468,7 @@ export default function SATConfigPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl">
                         <label className="text-[9px] font-black text-slate-500 uppercase ml-2 mb-1 block">Archivo .CER</label>
-                        <input type="file" accept=".cer" required onChange={e => setCerFile(e.target.files[0])} className="w-full text-[10px] text-slate-300 file:mr-4 file:py-1.5 file:px-4 file:rounded-xl file:border-0 file:text-[9px] file:font-bold file:uppercase file:bg-slate-800 file:text-white hover:file:bg-slate-700" />
+                        <input type="file" accept=".cer" required onChange={handleCargaCer} className="w-full text-[10px] text-slate-300 file:mr-4 file:py-1.5 file:px-4 file:rounded-xl file:border-0 file:text-[9px] file:font-bold file:uppercase file:bg-slate-800 file:text-white hover:file:bg-slate-700" />
                       </div>
                       
                       <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl">

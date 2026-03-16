@@ -22,12 +22,35 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
     const fechaTimbre = partesCadena.find(p => p.includes('T') && p.includes('-') && p.includes(':'));
     
     if (fechaTimbre) {
-      const dateObj = new Date(fechaTimbre);
-      const hora = dateObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-      const dia = dateObj.toLocaleDateString('es-MX');
-      fechaEmisionCompleta = `${dia} a las ${hora} hrs`;
+      const [fechaPart, horaPart] = fechaTimbre.split('T');
+      const [year, month, day] = fechaPart.split('-');
+      const [horas, minutos, segundos] = horaPart.split(':');
+      
+      // Creamos un objeto Date local con los datos exactos de la cadena del PAC
+      const dateObj = new Date(year, month - 1, day, horas, minutos, segundos || 0);
+      
+      // Restamos 1 hora matemáticamente para corregir el desfase del servidor del PAC
+      dateObj.setHours(dateObj.getHours() - 1);
+      
+      const finalDia = String(dateObj.getDate()).padStart(2, '0');
+      const finalMes = String(dateObj.getMonth() + 1).padStart(2, '0');
+      const finalAño = dateObj.getFullYear();
+      const finalHora = String(dateObj.getHours()).padStart(2, '0');
+      const finalMin = String(dateObj.getMinutes()).padStart(2, '0');
+      
+      fechaEmisionCompleta = `${finalDia}/${finalMes}/${finalAño} a las ${finalHora}:${finalMin} hrs`;
     }
+  } else {
+     // Si es borrador, forzamos la hora actual de Monterrey
+     const ahora = new Date();
+     const formatHoraMty = new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Monterrey', hour: '2-digit', minute: '2-digit', hour12: false });
+     const formatFechaMty = new Intl.DateTimeFormat('es-MX', { timeZone: 'America/Monterrey', year: 'numeric', month: '2-digit', day: '2-digit' });
+     fechaEmisionCompleta = `${formatFechaMty.format(ahora)} a las ${formatHoraMty.format(ahora)} hrs (Borrador)`;
   }
+
+  // ==========================================
+  // 1. CABECERA (LOGO Y DATOS DEL EMISOR)
+  // ... (el resto del código continúa igual)
 
   // ==========================================
   // 1. CABECERA (LOGO Y DATOS DEL EMISOR)
@@ -79,12 +102,20 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   doc.setFont("helvetica", "normal"); doc.setFontSize(8);
   doc.text(`Nombre: ${viaje.clientes?.nombre || 'PÚBLICO EN GENERAL'}`, 14, startYCliente + 11);
   doc.text(`RFC: ${viaje.clientes?.rfc || 'XAXX010101000'}`, 14, startYCliente + 16);
-  doc.text(`Uso CFDI: ${viaje.clientes?.uso_cfdi || 'G03'} | Régimen: ${viaje.clientes?.regimen_fiscal || '601'}`, 14, startYCliente + 20);
+  doc.text(`Uso CFDI: ${viaje.clientes?.uso_cfdi || 'G01'} | Régimen: ${viaje.clientes?.regimen_fiscal || '601'}`, 14, startYCliente + 20);
+
+  // Inyección táctica de cumplimiento fiscal
+  doc.setFont("helvetica", "bold");
+  doc.text("Servicio Amparado (CFDI):", 14, startYCliente + 25);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(80, 80, 80); // Tono gris oscuro para diferenciar la nota de seguridad
+  doc.text("Servicio de Flete Nacional (Clave SAT: 78101802)   |   Importe: - ", 56, startYCliente + 25);
+  doc.setTextColor(0); // Retornamos el pincel a color negro
 
   // ==========================================
   // 3. SECCIÓN: LOGÍSTICA (ORIGEN Y DESTINO)
   // ==========================================
-  let startYLogistica = startYCliente + 26;
+  let startYLogistica = startYCliente + 31; // Margen ampliado para acomodar la nueva línea
   doc.setFillColor(245, 245, 245); doc.rect(14, startYLogistica, 182, 6, 'F');
   doc.setFont("helvetica", "bold"); 
   doc.text("REMITENTE (ORIGEN)", 16, startYLogistica + 4.5);
@@ -123,9 +154,6 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   // 4. TABLAS (MERCANCÍAS Y TRANSPORTE)
   // ==========================================
   const filasMercancias = (viaje.mercancias_detalle || []).map(item => {
-    const valorDeclarado = (item.valor && item.valor > 0) ? `$${Number(item.valor).toLocaleString('es-MX')} ${item.moneda || 'MXN'}` : '---';
-    
-    // NUEVO: IMPRIMIMOS EXPLÍCITAMENTE "SÍ" o "NO" EN MAT. PELIGROSO
     const textoPeligroso = item.material_peligroso ? 'MAT. PELIGROSO: SÍ ⚠️' : 'MAT. PELIGROSO: NO';
     const descripcionAmpliacion = `${item.descripcion}\n${textoPeligroso}`;
     
@@ -134,21 +162,20 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
       item.embalaje || 'KGM',
       item.clave_sat,
       descripcionAmpliacion,
-      `${item.peso_kg} kg`,
-      valorDeclarado
+      `${item.peso_kg} kg`
+      // NOTA: Se ha eliminado la declaración de valor por seguridad
     ];
   });
 
   if (filasMercancias.length === 0 && viaje.mercancias) {
-    filasMercancias.push([viaje.cantidad_mercancia || 1, 'E48', viaje.mercancias?.clave_sat, `${viaje.mercancias?.descripcion}\nMAT. PELIGROSO: NO`, `${viaje.peso_total_kg} kg`, '---']);
+    filasMercancias.push([viaje.cantidad_mercancia || 1, 'E48', viaje.mercancias?.clave_sat, `${viaje.mercancias?.descripcion}\nMAT. PELIGROSO: NO`, `${viaje.peso_total_kg} kg`]);
   }
 
   autoTable(doc, {
     startY: startTablas,
-    head: [['Cant.', 'Emb.', 'Clave SAT', 'Descripción del Bien', 'Peso (KG)', 'Valor Decl.']],
+    head: [['Cant.', 'Emb.', 'Clave SAT', 'Descripción del Bien', 'Peso (KG)']],
     body: filasMercancias,
-    theme: 'grid', styles: { fontSize: 7 }, headStyles: { fillColor: [40, 40, 40] },
-    columnStyles: { 5: { halign: 'right' } }
+    theme: 'grid', styles: { fontSize: 7 }, headStyles: { fillColor: [40, 40, 40] }
   });
 
   const totalPeso = (viaje.mercancias_detalle || []).reduce((acc, curr) => acc + (Number(curr.peso_kg) || 0), 0) || viaje.peso_total_kg || 0;
@@ -177,7 +204,7 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   });
 
   // ==========================================
-  // 5. PIE FISCAL Y LOS 2 CÓDIGOS QR (SAT 3.1)
+  // 5. PIE FISCAL (QR ÚNICO Y SELLOS)
   // ==========================================
   let footerY = 225;
   if (doc.lastAutoTable.finalY > 215) {
@@ -188,43 +215,26 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   doc.setDrawColor(0); doc.setLineWidth(0.5);
   doc.line(14, footerY - 3, 196, footerY - 3);
 
-  const uuid = viaje.folio_fiscal || '00000000-0000-0000-0000-000000000000';
-  const rfcEmisor = perfilEmisor?.rfc || 'EKU9003173C9';
-  const rfcReceptor = viaje.clientes?.rfc || 'URE180429TM6';
-  const totalStr = (viaje.monto_flete || 0).toFixed(6);
-  const selloOcho = viaje.sello_emisor ? viaje.sello_emisor.slice(-8) : '00000000';
   const idCcp = viaje.id_ccp || 'POR-ASIGNAR';
 
-  // URL del QR 1 (CFDI de Ingreso Standard)
-  const qrCfdiUrl = `https://verificacfdi.facturaelectronica.sat.gob.mx/default.aspx?id=${uuid}&re=${rfcEmisor}&rr=${rfcReceptor}&tt=${totalStr}&fe=${selloOcho}`;
-  const qrCfdiApi = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrCfdiUrl)}`;
-
-  // URL del QR 2 (Carta Porte IdCCP Exclusivo)
+  // SOLO URL del QR 2 (Carta Porte IdCCP Exclusivo)
   const qrCcpUrl = `https://verificaccp.facturaelectronica.sat.gob.mx/default.aspx?idccp=${idCcp}`;
   const qrCcpApi = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(qrCcpUrl)}`;
 
   try {
-    // Generar e imprimir QR 1 (Izquierda)
-    const resp1 = await fetch(qrCfdiApi);
-    const blob1 = await resp1.blob();
-    const base64_1 = await new Promise(r => { const reader = new FileReader(); reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob1); });
-    doc.addImage(base64_1, 'PNG', 14, footerY, 28, 28);
-    doc.setFontSize(5); doc.setFont("helvetica", "bold");
-    doc.text("QR FACTURA (CFDI)", 28, footerY + 31, { align: 'center' });
-
-    // Generar e imprimir QR 2 (Derecha)
+    // Generar e imprimir QR CCP (A la izquierda)
     const resp2 = await fetch(qrCcpApi);
     const blob2 = await resp2.blob();
     const base64_2 = await new Promise(r => { const reader = new FileReader(); reader.onloadend = () => r(reader.result); reader.readAsDataURL(blob2); });
-    doc.addImage(base64_2, 'PNG', 168, footerY, 28, 28);
-    doc.text("QR CARTA PORTE", 182, footerY + 31, { align: 'center' });
+    doc.addImage(base64_2, 'PNG', 14, footerY, 28, 28);
+    doc.setFontSize(5); doc.setFont("helvetica", "bold");
+    doc.text("QR CARTA PORTE", 28, footerY + 31, { align: 'center' });
   } catch (e) { 
     doc.setDrawColor(200); 
-    doc.rect(14, footerY, 28, 28); doc.text("QR CFDI", 28, footerY + 14, { align: 'center' }); 
-    doc.rect(168, footerY, 28, 28); doc.text("QR CCP", 182, footerY + 14, { align: 'center' }); 
+    doc.rect(14, footerY, 28, 28); doc.text("QR CCP", 28, footerY + 14, { align: 'center' }); 
   }
 
-// Textos y Sellos centrados entre los dos QRs (x = 46 a 160)
+  // Textos y Sellos a la derecha del QR único (x = 46 a 196)
   let textoY = footerY + 2;
   doc.setFontSize(6); doc.setFont("helvetica", "bold");
   doc.text(`IdCCP: ${idCcp}`, 46, textoY);
@@ -232,25 +242,23 @@ export const generarPDFCartaPorte = async (viaje, perfilEmisor) => {
   textoY += 6;
   doc.text("Sello Digital del Emisor:", 46, textoY);
   doc.setFont("helvetica", "normal");
-  // 1. Guardamos el arreglo de líneas del emisor
-  const lineasSelloEmisor = doc.splitTextToSize(viaje.sello_emisor || 'Pendiente...', 115);
+  // Expandimos el texto del sello al no estar acorralado por el segundo QR
+  const lineasSelloEmisor = doc.splitTextToSize(viaje.sello_emisor || 'Pendiente...', 145); 
   doc.text(lineasSelloEmisor, 46, textoY + 3);
   
-  // 2. Calculamos dinámicamente el salto: 3 (margen sup) + (número de líneas * 2.5 alto de línea) + 3 (margen inf)
   textoY += 3 + (lineasSelloEmisor.length * 2.5) + 3;
   
   doc.setFont("helvetica", "bold");
   doc.text("Sello Digital del SAT:", 46, textoY);
   doc.setFont("helvetica", "normal");
-  // 3. Repetimos la lógica para el SAT
-  const lineasSelloSat = doc.splitTextToSize(viaje.sello_sat || 'Pendiente...', 115);
+  const lineasSelloSat = doc.splitTextToSize(viaje.sello_sat || 'Pendiente...', 145);
   doc.text(lineasSelloSat, 46, textoY + 3);
   
   textoY += 3 + (lineasSelloSat.length * 2.5) + 3;
   
   doc.setFont("helvetica", "bold"); doc.text("Cadena Original:", 46, textoY);
   doc.setFont("helvetica", "normal");
-  const lineasCadena = doc.splitTextToSize(viaje.cadena_original || '||Pendiente...||', 115);
+  const lineasCadena = doc.splitTextToSize(viaje.cadena_original || '||Pendiente...||', 145);
   doc.text(lineasCadena, 46, textoY + 3);
   
   // ==========================================

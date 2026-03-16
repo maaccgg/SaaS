@@ -31,7 +31,7 @@ function FacturasContenido() {
 
   const [formData, setFormData] = useState({ 
     cliente_id: '', monto_total: '', folio_fiscal: '', 
-    ruta: 'Ingreso Extraordinario', fecha_viaje: new Date().toISOString().split('T')[0],
+    ruta: '', fecha_viaje: new Date().toISOString().split('T')[0],
     fecha_vencimiento: '', forma_pago: '99', metodo_pago: 'PPD'
   });
 
@@ -131,7 +131,7 @@ function FacturasContenido() {
     }
   };
 
-  const timbrarFactura = async (factura) => {
+const timbrarFactura = async (factura) => {
     const clienteData = clientes.find(c => c.nombre === factura.cliente);
     if (!clienteData) {
       alert("⚠️ Error: No se encontró la información fiscal del cliente. Verifica tu catálogo de clientes.");
@@ -170,8 +170,17 @@ function FacturasContenido() {
         const selloSat = res.stamp?.sat_signature || "SELLO_SAT_NO_ENCONTRADO";
         const cadenaOriginal = res.stamp?.complement_string || "CADENA_NO_ENCONTRADA";
         
+        // === NUEVA LÍNEA: EXTRAEMOS EL CERTIFICADO DEL SAT ===
+        const certSat = res.stamp?.sat_cert_number || null;
+        
         const { error: supabaseError } = await supabase.from('facturas').update({ 
-            folio_fiscal: uuidReal, sello_emisor: selloEmisor, sello_sat: selloSat, cadena_original: cadenaOriginal, facturapi_id: res.id 
+            folio_fiscal: uuidReal, 
+            sello_emisor: selloEmisor, 
+            sello_sat: selloSat, 
+            cadena_original: cadenaOriginal, 
+            facturapi_id: res.id,
+            // === NUEVA LÍNEA: LO ENVIAMOS A SUPABASE ===
+            no_certificado_sat: certSat
           }).eq('id', factura.id);
 
         if (supabaseError) throw supabaseError;
@@ -245,7 +254,7 @@ function FacturasContenido() {
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           
-          <header className="mb-8 flex justify-between items-end">
+<header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
             <div>
               <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">Control de <span className="text-emerald-500">Ingresos</span></h1>
               {viajeIdHighlight ? (
@@ -255,73 +264,68 @@ function FacturasContenido() {
               )}
             </div>
 
-            <button onClick={() => setMostrarFormulario(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all">
-              <PlusCircle size={16} /> Crear Factura Libre
-            </button>
+            <div className="flex items-center gap-3">
+              {/* SELECTOR DE PERIODO TÉCNICO */}
+              <div className="relative shrink-0">
+                <button 
+                  onClick={() => {
+                    if (viajeIdHighlight) window.location.href = '/facturas'; // Limpiar URL si venimos de un viaje
+                    else setMostrarFiltro(!mostrarFiltro);
+                  }}
+                  className={`flex items-center gap-3 border px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
+                    ${filtroActivo ? 'bg-emerald-600/10 border-emerald-500/30 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}
+                    ${viajeIdHighlight ? 'border-orange-500/50 text-orange-400 hover:bg-orange-500/10' : ''}`}
+                >
+                  <Calendar size={14} className={filtroActivo ? 'text-emerald-500' : (viajeIdHighlight ? 'text-orange-500' : 'text-slate-500')} />
+                  {viajeIdHighlight ? 'Ver Todo el Historial' : (filtroActivo ? 'Filtro Activo' : 'Periodo')}
+                  {!viajeIdHighlight && <ChevronDown size={14} className={`transition-transform duration-200 ${mostrarFiltro ? 'rotate-180' : ''}`} />}
+                </button>
+
+                {mostrarFiltro && !viajeIdHighlight && (
+                  <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-20 p-5">
+                    <div className="mb-4">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Desde (Fecha Viaje)</label>
+                      <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none focus:border-emerald-500" />
+                    </div>
+                    <div className="mb-6">
+                      <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Hasta (Fecha Viaje)</label>
+                      <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none focus:border-emerald-500" />
+                    </div>
+                    <button onClick={() => { setFiltroActivo(true); setMostrarFiltro(false); }}
+                      className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-3 rounded-xl transition-colors mb-2">
+                      Aplicar Filtro
+                    </button>
+                    {filtroActivo && (
+                      <button onClick={() => { setFiltroActivo(false); setFechaInicio(''); setFechaFin(''); setMostrarFiltro(false); }}
+                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 font-black text-[10px] uppercase tracking-widest py-2.5 rounded-xl transition-colors">
+                        Limpiar
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* BOTÓN DE CREAR FACTURA LIBRE */}
+              <button onClick={() => setMostrarFormulario(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all border border-emerald-500/50">
+                <PlusCircle size={16} /> Registrar
+              </button>
+            </div>
           </header>
 
-          {/* BARRA DE FILTROS */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 border-b border-slate-800 pb-4">
-            
-            {/* Tarjetas de Resumen (Compactas) */}
-            <div className="flex gap-4">
-              <div className="bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-xl flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
-                <div>
-                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Cobrado</p>
-                  <p className="text-sm font-black text-emerald-400 font-mono">${metricas.cobrado.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
-                </div>
-              </div>
-              <div className="bg-slate-900/50 border border-slate-800 px-5 py-3 rounded-xl flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
-                <div>
-                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">Por Cobrar</p>
-                  <p className="text-sm font-black text-blue-400 font-mono">${metricas.pendiente.toLocaleString('es-MX', {minimumFractionDigits: 2})}</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Selector de Periodo Manual */}
-            <div className="relative shrink-0">
-              <button 
-                onClick={() => {
-                  if (viajeIdHighlight) window.location.href = '/facturas'; // Limpiar URL si venimos de un viaje
-                  else setMostrarFiltro(!mostrarFiltro);
-                }}
-                className={`flex items-center gap-3 border px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
-                  ${filtroActivo ? 'bg-emerald-600/10 border-emerald-500/30 text-emerald-400' : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'}
-                  ${viajeIdHighlight ? 'border-orange-500/50 text-orange-400 hover:bg-orange-500/10' : ''}`}
-              >
-                <Calendar size={14} className={filtroActivo ? 'text-emerald-500' : (viajeIdHighlight ? 'text-orange-500' : 'text-slate-500')} />
-                {viajeIdHighlight ? 'Ver Todo el Historial' : (filtroActivo ? 'Filtro Activo' : 'Periodo')}
-                {!viajeIdHighlight && <ChevronDown size={14} className={`transition-transform duration-200 ${mostrarFiltro ? 'rotate-180' : ''}`} />}
-              </button>
-
-              {mostrarFiltro && !viajeIdHighlight && (
-                <div className="absolute right-0 mt-2 w-72 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden z-20 p-5">
-                  <div className="mb-4">
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Desde (Fecha Viaje)</label>
-                    <input type="date" value={fechaInicio} onChange={(e) => setFechaInicio(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none focus:border-emerald-500" />
-                  </div>
-                  <div className="mb-6">
-                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-2 block">Hasta (Fecha Viaje)</label>
-                    <input type="date" value={fechaFin} onChange={(e) => setFechaFin(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 text-white text-sm rounded-xl p-3 outline-none focus:border-emerald-500" />
-                  </div>
-                  <button onClick={() => { setFiltroActivo(true); setMostrarFiltro(false); }}
-                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[10px] uppercase tracking-widest py-3 rounded-xl transition-colors mb-2">
-                    Aplicar Filtro
-                  </button>
-                  {filtroActivo && (
-                    <button onClick={() => { setFiltroActivo(false); setFechaInicio(''); setFechaFin(''); setMostrarFiltro(false); }}
-                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 font-black text-[10px] uppercase tracking-widest py-2.5 rounded-xl transition-colors">
-                      Limpiar
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
+          {/* TARJETAS DE RESUMEN (DISEÑO CORPORATIVO TIPO GASTOS) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+            <TarjetaDato 
+              titulo="Ingreso Cobrado" 
+              valor={`$${metricas.cobrado.toLocaleString('es-MX', {minimumFractionDigits: 2})}`} 
+              color="green" 
+            />
+            <TarjetaDato 
+              titulo="Por Cobrar" 
+              valor={`$${metricas.pendiente.toLocaleString('es-MX', {minimumFractionDigits: 2})}`} 
+              color="blue" 
+            />
           </div>
 
           {/* TABLA DE HISTÓRICO (NUEVO DISEÑO) */}

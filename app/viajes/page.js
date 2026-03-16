@@ -323,11 +323,27 @@ export default function ViajesPage() {
       const response = await fetch('https://www.facturapi.io/v2/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${facturapiKey}` }, body: JSON.stringify(invoiceData) });
       const res = await response.json();
       
-      if (response.ok) {
-        await supabase.from('viajes').update({ estatus: 'Emitido (Timbrado)', folio_fiscal: res.uuid, id_ccp: res.complements?.[0]?.data?.IdCCP || "Generado", sello_emisor: res.stamp?.signature, sello_sat: res.stamp?.sat_signature, cadena_original: res.stamp?.complement_string }).eq('id', viaje.id);
+if (response.ok) {
+        await supabase.from('viajes').update({ 
+          estatus: 'Emitido (Timbrado)', 
+          folio_fiscal: res.uuid, 
+          id_ccp: res.complements?.[0]?.data?.IdCCP || "Generado", 
+          sello_emisor: res.stamp?.signature, 
+          sello_sat: res.stamp?.sat_signature, 
+          cadena_original: res.stamp?.complement_string 
+        }).eq('id', viaje.id);
+        
         await supabase.from('facturas').update({ 
-          estatus_pago: 'Pendiente', facturapi_id: res.id, folio_fiscal: res.uuid, sello_emisor: res.stamp?.signature, sello_sat: res.stamp?.sat_signature, cadena_original: res.stamp?.complement_string
+          estatus_pago: 'Pendiente', 
+          facturapi_id: res.id, 
+          folio_fiscal: res.uuid, 
+          sello_emisor: res.stamp?.signature, 
+          sello_sat: res.stamp?.sat_signature, 
+          cadena_original: res.stamp?.complement_string,
+          // === NUEVA LÍNEA: EXTRACCIÓN DEL CERTIFICADO SAT ===
+          no_certificado_sat: res.stamp?.sat_cert_number
         }).eq('viaje_id', viaje.id);
+
         alert(`🎉 ¡CARTA PORTE TIMBRADA!\nUUID: ${res.uuid}`);
         obtenerViajes(sesion.user.id);
       } else {
