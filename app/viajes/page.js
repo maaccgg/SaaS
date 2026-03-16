@@ -39,7 +39,6 @@ export default function ViajesPage() {
   // ==============================================================
   const unidadSeleccionadaObj = catalogos.unidades.find(u => u.id === formData.unidad_id);
   const configVehicularSAT = unidadSeleccionadaObj?.configuracion_vehicular || '';
-  // Regla SAT: Si tiene 'T' (Tractocamión) o 'R' (Remolque), es articulado.
   const esCamionArticulado = configVehicularSAT.includes('T') || configVehicularSAT.includes('R');
 
   useEffect(() => {
@@ -227,6 +226,38 @@ export default function ViajesPage() {
       });
 
       // ==============================================================
+      // LÓGICA DE TIEMPO REAL (OVERRIDE DE ZONA HORARIA) Y PESO
+      // ==============================================================
+      const pesoTotalTimbre = (viaje.mercancias_detalle || []).reduce((acc, item) => acc + (Number(item.peso_kg) || 0), 0) || viaje.peso_total_kg || 1;
+      
+      const ahora = new Date();
+      // OVERRIDE: Forzamos la resta de 1 hora para neutralizar el bug del servidor
+      ahora.setHours(ahora.getHours() - 1);
+
+      // Extracción manual estricta ISO 8601
+      const año = ahora.getFullYear();
+      const mes = String(ahora.getMonth() + 1).padStart(2, '0');
+      const dia = String(ahora.getDate()).padStart(2, '0');
+      const horas = String(ahora.getHours()).padStart(2, '0');
+      const minutos = String(ahora.getMinutes()).padStart(2, '0');
+      const segundos = String(ahora.getSeconds()).padStart(2, '0');
+
+      const fechaHoraCFDI = `${año}-${mes}-${dia}T${horas}:${minutos}:${segundos}`;
+
+      // Cálculo de llegada estimado basado en distancia
+      const horasTrayecto = Math.ceil((viaje.distancia_km || 60) / 60) + 1;
+      const llegadaDate = new Date(ahora.getTime() + (horasTrayecto * 60 * 60 * 1000));
+      
+      const llegadaAño = llegadaDate.getFullYear();
+      const llegadaMes = String(llegadaDate.getMonth() + 1).padStart(2, '0');
+      const llegadaDia = String(llegadaDate.getDate()).padStart(2, '0');
+      const llegadaHoras = String(llegadaDate.getHours()).padStart(2, '0');
+      const llegadaMinutos = String(llegadaDate.getMinutes()).padStart(2, '0');
+      const llegadaSegundos = String(llegadaDate.getSeconds()).padStart(2, '0');
+
+      const fechaHoraLlegadaCFDI = `${llegadaAño}-${llegadaMes}-${llegadaDia}T${llegadaHoras}:${llegadaMinutos}:${llegadaSegundos}`;
+
+      // ==============================================================
       // VALIDACIÓN ESTRICTA DEL SAT PARA REMOLQUES
       // ==============================================================
       const configSAT = u.configuracion_vehicular.trim().toUpperCase();
@@ -264,6 +295,7 @@ export default function ViajesPage() {
 
       const invoiceData = {
         type: "I",
+        date: fechaHoraCFDI, // INYECCIÓN DIRECTA DE LA HORA CORREGIDA EN EL NODO PRINCIPAL
         customer: {
           legal_name: viaje.clientes.nombre, tax_id: viaje.clientes.rfc, tax_system: viaje.clientes.regimen_fiscal, address: { zip: viaje.clientes.codigo_postal }
         },
@@ -276,11 +308,11 @@ export default function ViajesPage() {
           data: {
             IdCCP: viaje.id_ccp, TranspInternac: "No", TotalDistRec: parseFloat(viaje.distancia_km || 150),
             Ubicaciones: [
-              { TipoUbicacion: "Origen", RFCRemitenteDestinatario: rfcOrigen, FechaHoraSalidaLlegada: `${viaje.fecha_salida}T08:00:00`, Domicilio: { Calle: viaje.origen.nombre_lugar, Estado: viaje.origen.estado, Pais: "MEX", CodigoPostal: viaje.origen.codigo_postal } },
-              { TipoUbicacion: "Destino", RFCRemitenteDestinatario: rfcDestino, DistanciaRecorrida: parseFloat(viaje.distancia_km || 150), FechaHoraSalidaLlegada: `${viaje.fecha_salida}T20:00:00`, Domicilio: { Calle: viaje.destino.nombre_lugar, Estado: viaje.destino.estado, Pais: "MEX", CodigoPostal: viaje.destino.codigo_postal } }
+              { TipoUbicacion: "Origen", RFCRemitenteDestinatario: rfcOrigen, FechaHoraSalidaLlegada: fechaHoraCFDI, Domicilio: { Calle: viaje.origen.nombre_lugar, Estado: viaje.origen.estado, Pais: "MEX", CodigoPostal: viaje.origen.codigo_postal } },
+              { TipoUbicacion: "Destino", RFCRemitenteDestinatario: rfcDestino, FechaHoraSalidaLlegada: fechaHoraLlegadaCFDI, Domicilio: { Calle: viaje.destino.nombre_lugar, Estado: viaje.destino.estado, Pais: "MEX", CodigoPostal: viaje.destino.codigo_postal } }
             ],
             Mercancias: {
-              PesoBrutoTotal: calcularPesoTotal(), UnidadPeso: "KGM", NumTotalMercancias: arregloMercanciasFacturapi.length, Mercancia: arregloMercanciasFacturapi, 
+              PesoBrutoTotal: pesoTotalTimbre, UnidadPeso: "KGM", NumTotalMercancias: arregloMercanciasFacturapi.length, Mercancia: arregloMercanciasFacturapi, 
               Autotransporte: autotransporteObj
             },
             FiguraTransporte: [{ TipoFigura: "01", RFCFigura: op.rfc, NumLicencia: op.numero_licencia, NombreFigura: op.nombre_completo }]
