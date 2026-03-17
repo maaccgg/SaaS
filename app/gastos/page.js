@@ -17,9 +17,10 @@ export default function GastosOperativosPage() {
   const [unidades, setUnidades] = useState([]);
   const [historial, setHistorial] = useState([]);
   const [metricas, setMetricas] = useState({ totalPeriodo: 0, conteo: 0 });
+  
+  const [empresaId, setEmpresaId] = useState(null);
   const [rolUsuario, setRolUsuario] = useState('miembro');
 
-  // Estados para el rango de fechas (Default: mes actual)
   const hoy = new Date();
   const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
   const ultimoDiaMes = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).toISOString().split('T')[0];
@@ -37,34 +38,40 @@ export default function GastosOperativosPage() {
       if (!session) window.location.href = "/";
       else {
         setSesion(session);
-        obtenerDatos(session.user.id);
+        inicializarDatos(session.user.id);
       }
     });
-  }, [fechaInicio, fechaFin]); // Se dispara al cambiar cualquier fecha
+  }, []);
 
-  async function obtenerDatos(userId) {
+  useEffect(() => {
+    if (empresaId) obtenerDatos(empresaId);
+  }, [fechaInicio, fechaFin]);
+
+  async function inicializarDatos(userId) {
     setLoading(true);
-
-
     const { data: perfilData } = await supabase
       .from('perfiles')
-      .select('rol')
+      .select('empresa_id, rol')
       .eq('id', userId)
       .single();
 
-    if (perfilData?.rol) {
-      setRolUsuario(perfilData.rol);
-    }
+    const idMaestro = perfilData?.empresa_id || userId;
+    setEmpresaId(idMaestro);
+    if (perfilData?.rol) setRolUsuario(perfilData.rol);
+
+    await obtenerDatos(idMaestro);
+  }
+
+  async function obtenerDatos(idMaestro) {
+    setLoading(true);
     
-    // 1. Cargar catálogo de unidades
-    const { data: unidadesBD } = await supabase.from('unidades').select('id, numero_economico').eq('usuario_id', userId);
+    const { data: unidadesBD } = await supabase.from('unidades').select('id, numero_economico').eq('usuario_id', idMaestro);
     setUnidades(unidadesBD || []);
 
-    // 2. Consulta con Rango de Fechas
     const { data: gastosBD, error } = await supabase
       .from('mantenimientos')
       .select(`*, unidades(numero_economico)`)
-      .eq('usuario_id', userId)
+      .eq('usuario_id', idMaestro)
       .gte('fecha', fechaInicio)
       .lte('fecha', fechaFin)
       .order('fecha', { ascending: false });
@@ -82,13 +89,13 @@ export default function GastosOperativosPage() {
     e.preventDefault();
     setLoading(true);
     const { error } = await supabase.from('mantenimientos').insert([
-      { ...formData, costo: parseFloat(formData.costo), usuario_id: sesion.user.id }
+      { ...formData, costo: parseFloat(formData.costo), usuario_id: empresaId } 
     ]);
 
     if (!error) {
       setFormData({ unidad_id: '', descripcion: '', costo: '', tipo: 'Preventivo', fecha: new Date().toISOString().split('T')[0] });
       setMostrarFormulario(false);
-      obtenerDatos(sesion.user.id);
+      obtenerDatos(empresaId);
     }
     setLoading(false);
   };
@@ -96,13 +103,13 @@ export default function GastosOperativosPage() {
   const eliminarGasto = async (id) => {
     if (!confirm("¿Eliminar registro de gasto?")) return;
     await supabase.from('mantenimientos').delete().eq('id', id);
-    obtenerDatos(sesion.user.id);
+    obtenerDatos(empresaId);
   };
 
   if (!sesion) return <div className="min-h-screen bg-slate-950"></div>;
 
   return (
-    <div className="flex bg-slate-950 min-h-screen text-slate-200">
+    <div className="flex bg-slate-950 min-h-screen text-slate-200 w-full">
       <Sidebar />
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
@@ -116,7 +123,6 @@ export default function GastosOperativosPage() {
             </div>
             
             <div className="flex items-center gap-3">
-              {/* SELECTOR DE PERIODO TÉCNICO */}
               <div className="relative">
                 <button 
                   onClick={() => setMostrarFiltro(!mostrarFiltro)}
@@ -152,7 +158,6 @@ export default function GastosOperativosPage() {
             </div>
           </header>
 
-{/* TARJETAS DE RESUMEN (RESTRINGIDAS POR ROL) */}
           {rolUsuario === 'administrador' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 animate-in fade-in">
               <TarjetaDato 
@@ -160,20 +165,86 @@ export default function GastosOperativosPage() {
                 valor={`$${metricas.totalPeriodo.toLocaleString('es-MX', {minimumFractionDigits: 2})}`} 
                 color="blue" 
               />
-            </div>
-          )}
-
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 animate-in fade-in">
-
               <TarjetaDato 
                 titulo="Registros" 
                 valor={metricas.conteo.toString()} 
                 color="blue" 
               />
             </div>
+          )}
 
-          {/* MODAL DE REGISTRO */}
+          {/* TABLA DE HISTORIAL ESTANDARIZADA */}
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl mb-12">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-[13px]">
+                <thead>
+                  <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-[12px] font-semibold uppercase tracking-wider">
+                    <th className="p-4 pl-8 font-normal w-16">Tipo</th>
+                    <th className="p-4 font-normal">Detalle del Gasto</th>
+                    <th className="p-4 font-normal">Unidad</th>
+                    <th className="p-4 font-normal">Fecha</th>
+                    <th className="p-4 font-normal">Monto</th>
+                    <th className="p-4 pr-8 text-right font-normal">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {historial.map((item) => (
+                    <tr key={item.id} className="hover:bg-slate-800/30 transition-colors group">
+                      
+                      <td className="p-4 pl-8 align-middle">
+                        <div className={`p-2.5 w-fit rounded-xl border ${item.tipo === 'Correctivo' ? 'bg-red-500/10 border-red-500/30 text-red-400' : (item.tipo === 'Combustible' ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400')}`}>
+                          {item.tipo === 'Combustible' ? <Fuel size={16}/> : <Wrench size={16} />}
+                        </div>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-white font-bold uppercase truncate max-w-[250px]">{item.descripcion}</span>
+                          <span className="text-slate-500 text-[10px] uppercase tracking-widest">{item.tipo}</span>
+                        </div>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <span className="text-[12px] font-mono font-medium text-slate-300 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800 flex items-center gap-2 w-fit">
+                          <Truck size={12} className="text-slate-500"/>
+                          {item.unidades?.numero_economico || 'S/U'}
+                        </span>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <span className="text-slate-400 text-[12px]">{item.fecha}</span>
+                      </td>
+
+                      <td className="p-4 align-middle">
+                        <span className="text-[14px] font-mono font-medium text-white">
+                          ${Number(item.costo).toLocaleString('es-MX', {minimumFractionDigits: 2})}
+                        </span>
+                      </td>
+
+                      <td className="p-4 pr-8 align-middle">
+                        <div className="flex items-center justify-end gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => eliminarGasto(item.id)} title="Eliminar Gasto" className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors">
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                      
+                    </tr>
+                  ))}
+                  
+                  {historial.length === 0 && (
+                    <tr>
+                      <td colSpan="6" className="py-16 text-center">
+                        <Wrench size={32} className="mx-auto text-slate-700 mb-3" />
+                        <p className="text-slate-500 uppercase tracking-widest text-sm">Sin registros en este rango de fechas.</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {mostrarFormulario && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setMostrarFormulario(false)} />
@@ -196,7 +267,7 @@ export default function GastosOperativosPage() {
                     </select>
                     <input required className="md:col-span-2 w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white" 
                       value={formData.descripcion} onChange={e => setFormData({...formData, descripcion: e.target.value})} placeholder="Descripción" />
-                    <input required type="number" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white font-mono" 
+                    <input required type="number" step="0.01" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white font-mono" 
                       value={formData.costo} onChange={e => setFormData({...formData, costo: e.target.value})} placeholder="0.00" />
                     <input type="date" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white" 
                       value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
@@ -208,54 +279,6 @@ export default function GastosOperativosPage() {
               </div>
             </div>
           )}
-
-          {/* TABLA DE HISTORIAL */}
-          <div className="bg-slate-900 border border-slate-800 rounded-[2.5rem] shadow-2xl overflow-hidden p-8">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-separate border-spacing-y-3">
-                <thead>
-                  <tr className="text-[9px] font-black text-slate-600 uppercase tracking-widest px-4">
-                    <th className="pl-4">Tipo</th>
-                    <th>Unidad</th>
-                    <th>Descripción</th>
-                    <th>Fecha</th>
-                    <th>Monto</th>
-                    <th className="text-right pr-4">Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {historial.map((item) => (
-                    <tr key={item.id} className="bg-slate-950 border border-slate-800 group hover:border-blue-500/30 transition-all">
-                      <td className="py-4 pl-4 rounded-l-2xl border-y border-l border-slate-800">
-                        <div className={`p-2 w-fit rounded-lg ${item.tipo === 'Correctivo' ? 'bg-blue-600' : 'bg-slate-800'} text-white`}>
-                          {item.tipo === 'Combustible' ? <Fuel size={14}/> : <Wrench size={14} />}
-                        </div>
-                      </td>
-                      <td className="py-4 border-y border-slate-800 font-black text-white italic text-[11px]">
-                        {item.unidades?.numero_economico || 'S/U'}
-                      </td>
-                      <td className="py-4 border-y border-slate-800">
-                        <h4 className="text-[11px] font-bold text-white uppercase">{item.descripcion}</h4>
-                        <p className="text-[9px] text-slate-500 uppercase">{item.tipo}</p>
-                      </td>
-                      <td className="py-4 border-y border-slate-800 text-[10px] text-slate-300 font-bold">
-                        {item.fecha}
-                      </td>
-                      <td className="py-4 border-y border-slate-800 text-[11px] font-mono font-black text-white">
-                        ${Number(item.costo).toLocaleString()}
-                      </td>
-                      <td className="py-4 pr-4 rounded-r-2xl border-y border-r border-slate-800 text-right">
-                        <button onClick={() => eliminarGasto(item.id)} className="text-slate-800 hover:text-red-500 p-2"><Trash2 size={14} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {historial.length === 0 && (
-                <p className="text-slate-600 text-[10px] font-black uppercase italic text-center py-20">Sin registros en este rango de fechas.</p>
-              )}
-            </div>
-          </div>
         </div>
       </main>
     </div>

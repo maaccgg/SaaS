@@ -18,7 +18,7 @@ function FacturasContenido() {
   const [loading, setLoading] = useState(false);
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   
-  // ESTADOS DE FILTROS Y PERIODO (NUEVO DISEÑO)
+  // ESTADOS DE FILTROS Y PERIODO
   const [mostrarFiltro, setMostrarFiltro] = useState(false);
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
@@ -28,6 +28,9 @@ function FacturasContenido() {
   const [historial, setHistorial] = useState([]);
   const [clientes, setClientes] = useState([]);
   const [perfilEmisor, setPerfilEmisor] = useState(null);
+  
+  // === NUEVOS ESTADOS DE ARQUITECTURA ===
+  const [empresaId, setEmpresaId] = useState(null);
   const [rolUsuario, setRolUsuario] = useState('miembro');
 
   const [formData, setFormData] = useState({ 
@@ -36,16 +39,20 @@ function FacturasContenido() {
     fecha_vencimiento: '', forma_pago: '99', metodo_pago: 'PPD'
   });
 
+  // 1. INICIALIZACIÓN DE SESIÓN (Solo corre al abrir la pantalla)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) window.location.href = "/";
       else {
         setSesion(session);
-        obtenerDatos(session.user.id);
-        obtenerClientes(session.user.id);
-        obtenerPerfilEmisor(session.user.id);
+        inicializarDatos(session.user.id);
       }
     });
+  }, []);
+
+  // 2. RECARGA DINÁMICA POR FILTROS (Solo corre si ya tenemos el ADN de la empresa)
+  useEffect(() => {
+    if (empresaId) obtenerDatos(empresaId);
   }, [fechaInicio, fechaFin, filtroActivo, viajeIdHighlight]);
 
   useEffect(() => {
@@ -67,35 +74,44 @@ function FacturasContenido() {
     }
   }, [formData.metodo_pago]);
 
-  async function obtenerPerfilEmisor(userId) {
-    const { data } = await supabase.from('perfil_emisor').select('*').eq('usuario_id', userId).single();
-    if (data) setPerfilEmisor(data);
-  }
-
-  async function obtenerClientes(userId) {
-    const { data } = await supabase.from('clientes').select('*').eq('usuario_id', userId).order('nombre');
-    setClientes(data || []);
-  }
-
-  async function obtenerDatos(userId) {
-
-const { data: perfilData } = await supabase
+  // === FUNCIÓN MAESTRA DE INICIALIZACIÓN ===
+  async function inicializarDatos(userId) {
+    setLoading(true);
+    const { data: perfilData } = await supabase
       .from('perfiles')
-      .select('rol')
+      .select('empresa_id, rol')
       .eq('id', userId)
       .single();
 
-    if (perfilData?.rol) {
-      setRolUsuario(perfilData.rol);
-    }
+    const idMaestro = perfilData?.empresa_id || userId;
+    setEmpresaId(idMaestro);
+    if (perfilData?.rol) setRolUsuario(perfilData.rol);
 
+    await Promise.all([
+      obtenerDatos(idMaestro),
+      obtenerClientes(idMaestro),
+      obtenerPerfilEmisor(idMaestro)
+    ]);
+    setLoading(false);
+  }
 
+  async function obtenerPerfilEmisor(idMaestro) {
+    const { data } = await supabase.from('perfil_emisor').select('*').eq('usuario_id', idMaestro).single();
+    if (data) setPerfilEmisor(data);
+  }
+
+  async function obtenerClientes(idMaestro) {
+    const { data } = await supabase.from('clientes').select('*').eq('usuario_id', idMaestro).order('nombre');
+    setClientes(data || []);
+  }
+
+  async function obtenerDatos(idMaestro) {
     setLoading(true);
     let query = supabase
       .from('facturas')
       .select('*') 
-      .eq('usuario_id', userId)
-      .order('folio_interno', { ascending: false }) // ORDENAMOS POR EL NUEVO FOLIO
+      .eq('usuario_id', idMaestro) // <-- CONSULTA UNIFICADA
+      .order('folio_interno', { ascending: false })
       .order('created_at', { ascending: false });
 
     if (viajeIdHighlight) {
@@ -144,7 +160,7 @@ const { data: perfilData } = await supabase
     }
   };
 
-const timbrarFactura = async (factura) => {
+  const timbrarFactura = async (factura) => {
     const clienteData = clientes.find(c => c.nombre === factura.cliente);
     if (!clienteData) {
       alert("⚠️ Error: No se encontró la información fiscal del cliente. Verifica tu catálogo de clientes.");
@@ -182,8 +198,6 @@ const timbrarFactura = async (factura) => {
         const selloEmisor = res.stamp?.signature || "SELLO_NO_ENCONTRADO";
         const selloSat = res.stamp?.sat_signature || "SELLO_SAT_NO_ENCONTRADO";
         const cadenaOriginal = res.stamp?.complement_string || "CADENA_NO_ENCONTRADA";
-        
-        // === NUEVA LÍNEA: EXTRAEMOS EL CERTIFICADO DEL SAT ===
         const certSat = res.stamp?.sat_cert_number || null;
         
         const { error: supabaseError } = await supabase.from('facturas').update({ 
@@ -192,13 +206,12 @@ const timbrarFactura = async (factura) => {
             sello_sat: selloSat, 
             cadena_original: cadenaOriginal, 
             facturapi_id: res.id,
-            // === NUEVA LÍNEA: LO ENVIAMOS A SUPABASE ===
             no_certificado_sat: certSat
           }).eq('id', factura.id);
 
         if (supabaseError) throw supabaseError;
         alert(`🎉 ¡FACTURA TIMBRADA CON ÉXITO!\n\nUUID: ${uuidReal}`);
-        obtenerDatos(sesion.user.id);
+        obtenerDatos(empresaId); // <-- RECARGA UNIFICADA
       } else {
         alert(`❌ Error del SAT:\n${res.message || "Error desconocido"}`);
       }
@@ -211,14 +224,14 @@ const timbrarFactura = async (factura) => {
     setLoading(true);
 
     try {
-      // 1. Buscamos el máximo folio actual para generar el "F-000X"
-      const { data: maxFolioData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
+      // 1. Buscamos el máximo folio actual con el ID de la Empresa
+      const { data: maxFolioData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
       let nuevoFolio = (maxFolioData?.[0]?.folio_interno || 0) + 1;
 
       const clienteSeleccionado = clientes.find(c => c.id === formData.cliente_id);
 
       const { error } = await supabase.from('facturas').insert([{ 
-          folio_interno: nuevoFolio, // <--- INYECTAMOS EL FOLIO
+          folio_interno: nuevoFolio, 
           cliente: clienteSeleccionado.nombre,
           monto_total: parseFloat(formData.monto_total), 
           folio_fiscal: formData.folio_fiscal,
@@ -228,14 +241,14 @@ const timbrarFactura = async (factura) => {
           forma_pago: formData.forma_pago,
           metodo_pago: formData.metodo_pago,
           estatus_pago: 'Pendiente',
-          usuario_id: sesion.user.id 
+          usuario_id: empresaId // <-- INYECCIÓN DE ADN
         }]);
 
       if (error) throw error;
       
       setFormData({ cliente_id: '', monto_total: '', folio_fiscal: '', ruta: 'Ingreso Extraordinario', fecha_viaje: new Date().toISOString().split('T')[0], fecha_vencimiento: '', forma_pago: '99', metodo_pago: 'PPD' });
       setMostrarFormulario(false);
-      obtenerDatos(sesion.user.id);
+      obtenerDatos(empresaId);
     } catch (error) {
       alert("Fallo al guardar: " + error.message);
     } finally {
@@ -246,7 +259,7 @@ const timbrarFactura = async (factura) => {
   const alternarEstatus = async (id, estatusActual) => {
     const nuevoEstatus = estatusActual === 'Pendiente' ? 'Pagado' : 'Pendiente';
     await supabase.from('facturas').update({ estatus_pago: nuevoEstatus }).eq('id', id);
-    obtenerDatos(sesion.user.id);
+    obtenerDatos(empresaId);
   };
 
   const eliminarFactura = async (id, tieneViajeAsociado) => {
@@ -256,7 +269,7 @@ const timbrarFactura = async (factura) => {
     }
     if (!confirm("¿Eliminar registro manual?")) return;
     await supabase.from('facturas').delete().eq('id', id);
-    obtenerDatos(sesion.user.id);
+    obtenerDatos(empresaId);
   };
 
   if (!sesion) return <div className="min-h-screen bg-slate-950"></div>;
@@ -267,7 +280,7 @@ const timbrarFactura = async (factura) => {
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           
-<header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
             <div>
               <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none">Control de <span className="text-emerald-500">Ingresos</span></h1>
               {viajeIdHighlight ? (
@@ -278,11 +291,10 @@ const timbrarFactura = async (factura) => {
             </div>
 
             <div className="flex items-center gap-3">
-              {/* SELECTOR DE PERIODO TÉCNICO */}
               <div className="relative shrink-0">
                 <button 
                   onClick={() => {
-                    if (viajeIdHighlight) window.location.href = '/facturas'; // Limpiar URL si venimos de un viaje
+                    if (viajeIdHighlight) window.location.href = '/facturas'; 
                     else setMostrarFiltro(!mostrarFiltro);
                   }}
                   className={`flex items-center gap-3 border px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all
@@ -320,15 +332,13 @@ const timbrarFactura = async (factura) => {
                 )}
               </div>
 
-              {/* BOTÓN DE CREAR FACTURA LIBRE */}
               <button onClick={() => setMostrarFormulario(true)} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all border border-emerald-500/50">
                 <PlusCircle size={16} /> Registrar Factura 
               </button>
             </div>
           </header>
 
-          {/* TARJETAS DE RESUMEN (DISEÑO CORPORATIVO TIPO GASTOS) */}
-{rolUsuario === 'administrador' && (
+          {rolUsuario === 'administrador' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12 animate-in fade-in">
               <TarjetaDato 
                 titulo="Ingreso Cobrado" 
@@ -343,7 +353,6 @@ const timbrarFactura = async (factura) => {
             </div>
           )}
 
-          {/* TABLA DE HISTÓRICO (NUEVO DISEÑO) */}
           <div className="bg-slate-900 border border-slate-800 rounded-4xl overflow-hidden shadow-2xl">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-[13px]">
@@ -368,7 +377,6 @@ const timbrarFactura = async (factura) => {
                     return (
                       <tr key={item.id} className="hover:bg-slate-800/30 transition-colors group">
                         
-                        {/* COLUMNA 1: CHECK DE PAGO */}
                         <td className="p-4 pl-8 align-middle">
                           <button onClick={() => alternarEstatus(item.id, item.estatus_pago)} title="Marcar como Pagado/Pendiente"
                             className={`p-2 rounded-lg transition-all ${item.estatus_pago === 'Pagado' ? 'bg-emerald-600/20 text-emerald-500' : 'bg-slate-800 text-slate-500 hover:text-emerald-400'}`}>
@@ -376,15 +384,12 @@ const timbrarFactura = async (factura) => {
                           </button>
                         </td>
 
-                        {/* COLUMNA 2: FOLIOS CRUZADOS */}
                         <td className="p-4 align-middle">
                           <div className="flex flex-col items-start gap-1">
-                            {/* Folio Contable F- */}
                             <span className="text-[14px] text-white font-mono font-medium">
                               {item.folio_interno ? `F-${String(item.folio_interno).padStart(4, '0')}` : 'F-S/N'}
                             </span>
                             
-                            {/* Folio Operativo V- (LA MAGIA) */}
                             {vieneDeViaje ? (
                               <span className="inline-flex px-2 py-0.5 rounded bg-blue-900/30 border border-blue-500/30 text-blue-400 uppercase tracking-widest text-[9px] items-center gap-1 mt-0.5">
                                 <Truck size={8}/> VIAJE: {item.folio_viaje ? `V-${String(item.folio_viaje).padStart(4, '0')}` : 'V-S/N'}
@@ -397,7 +402,6 @@ const timbrarFactura = async (factura) => {
                           </div>
                         </td>
 
-                        {/* COLUMNA 3: CLIENTE */}
                         <td className="p-4 align-middle">
                           <div className="flex flex-col gap-0.5">
                             <span className="text-white truncate max-w-[200px]" title={item.cliente}>{item.cliente}</span>
@@ -408,12 +412,10 @@ const timbrarFactura = async (factura) => {
                           </div>
                         </td>
 
-                        {/* COLUMNA 4: CONCEPTO */}
                         <td className="p-4 align-middle max-w-[200px]">
                           <span className="text-slate-300 text-[12px] truncate block" title={item.ruta}>{item.ruta || '---'}</span>
                         </td>
 
-                        {/* COLUMNA 5: VENCIMIENTO */}
                         <td className="p-4 align-middle">
                            {item.estatus_pago === 'Pagado' ? (
                              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Liquidada</span>
@@ -427,14 +429,12 @@ const timbrarFactura = async (factura) => {
                            )}
                         </td>
 
-                        {/* COLUMNA 6: MONTO TOTAL */}
                         <td className="p-4 align-middle">
                           <span className={`text-[14px] font-mono font-medium ${item.estatus_pago === 'Pagado' ? 'text-emerald-400' : 'text-white'}`}>
                             ${Number(item.monto_total).toLocaleString('es-MX', {minimumFractionDigits: 2})}
                           </span>
                         </td>
 
-                        {/* COLUMNA 7: ACCIONES */}
                         <td className="p-4 pr-8 align-middle">
                           <div className="flex items-center justify-end gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
                             
@@ -473,7 +473,6 @@ const timbrarFactura = async (factura) => {
             </div>
           </div>
 
-          {/* EL MODAL DE CREACIÓN MANUAL SIGUE INTACTO */}
           {mostrarFormulario && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-md" onClick={() => setMostrarFormulario(false)} />
@@ -482,7 +481,6 @@ const timbrarFactura = async (factura) => {
                 <h2 className="text-2xl font-black text-white italic uppercase mb-8">Registrar <span className="text-emerald-500">Factura</span></h2>
                 
                 <form onSubmit={registrarFactura} className="space-y-6">
-                  {/* SECCIÓN 1: DATOS BÁSICOS */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="md:col-span-2">
                       <div className="flex justify-between items-center mb-2">
@@ -506,7 +504,6 @@ const timbrarFactura = async (factura) => {
                     </div>
                   </div>
 
-                  {/* SECCIÓN 2: OPCIONES FISCALES */}
                   <div className="p-6 bg-slate-950 border border-slate-800 rounded-2xl">
                     <p className="text-[12px] font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2"><Settings size={12}/> Configuración SAT (CFDI 4.0)</p>
                     <div className="grid grid-cols-2 gap-4">
@@ -531,7 +528,6 @@ const timbrarFactura = async (factura) => {
                     </div>
                   </div>
 
-                  {/* SECCIÓN 3: FECHAS */}
                   <div className="grid grid-cols-2 gap-6">
                     <div>
                       <label className="text-[12px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Fecha de Emisión</label>

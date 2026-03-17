@@ -28,13 +28,16 @@ export default function Page() {
   
   const [fechaInicio, setFechaInicio] = useState(primerDiaMes);
   const [fechaFin, setFechaFin] = useState(ultimoDiaMes);
-  const [rolUsuario, setRolUsuario] = useState('miembro');
 
   const [sesion, setSesion] = useState(null);
   const [email, setEmail] = useState(""); 
   const [password, setPassword] = useState(""); 
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+
+  // === NUEVOS ESTADOS DE ARQUITECTURA ===
+  const [empresaId, setEmpresaId] = useState(null);
+  const [rolUsuario, setRolUsuario] = useState('miembro');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -51,21 +54,22 @@ export default function Page() {
     const ahora = new Date();
     const fIni = filtroActivo && fechaInicio ? new Date(fechaInicio + 'T00:00:00') : null;
     const fFinObj = filtroActivo && fechaFin ? new Date(fechaFin + 'T23:59:59') : null;
-
+    
+    // 0. VERIFICAR ROL DEL USUARIO Y NÚCLEO DE DATOS
     const { data: perfilData } = await supabase
       .from('perfiles')
-      .select('rol')
+      .select('empresa_id, rol')
       .eq('id', userId)
       .single();
 
-    if (perfilData?.rol) {
-      setRolUsuario(perfilData.rol);
-    }
-    
-    // 1. CONSTRUCCIÓN DE CONSULTAS (MÉTRICAS)
-    let queryFacturas = supabase.from('facturas').select('monto_total').eq('usuario_id', userId).eq('estatus_pago', 'Pagado');
-    let queryGastos = supabase.from('mantenimientos').select('costo').eq('usuario_id', userId);
-    let queryViajes = supabase.from('viajes').select('estatus').eq('usuario_id', userId);
+    const idMaestro = perfilData?.empresa_id || userId;
+    setEmpresaId(idMaestro);
+    if (perfilData?.rol) setRolUsuario(perfilData.rol);
+
+    // 1. CONSTRUCCIÓN DE CONSULTAS (MÉTRICAS BASADAS EN EL ID MAESTRO)
+    let queryFacturas = supabase.from('facturas').select('monto_total').eq('usuario_id', idMaestro).eq('estatus_pago', 'Pagado');
+    let queryGastos = supabase.from('mantenimientos').select('costo').eq('usuario_id', idMaestro);
+    let queryViajes = supabase.from('viajes').select('estatus').eq('usuario_id', idMaestro);
 
     if (filtroActivo && fechaInicio && fechaFin) {
       queryFacturas = queryFacturas.gte('fecha_viaje', fechaInicio).lte('fecha_viaje', fechaFin);
@@ -79,9 +83,9 @@ export default function Page() {
       { data: unidades }, { data: operadores }, { data: facturasPendientes }
     ] = await Promise.all([
       queryFacturas, queryGastos, queryViajes,
-      supabase.from('unidades').select('numero_economico, vencimiento_seguro, vencimiento_sct').eq('usuario_id', userId),
-      supabase.from('operadores').select('nombre_completo, vencimiento_licencia').eq('usuario_id', userId),
-      supabase.from('facturas').select('cliente, fecha_vencimiento, monto_total').eq('usuario_id', userId).eq('estatus_pago', 'Pendiente')
+      supabase.from('unidades').select('numero_economico, vencimiento_seguro, vencimiento_sct').eq('usuario_id', idMaestro),
+      supabase.from('operadores').select('nombre_completo, vencimiento_licencia').eq('usuario_id', idMaestro),
+      supabase.from('facturas').select('cliente, fecha_vencimiento, monto_total').eq('usuario_id', idMaestro).eq('estatus_pago', 'Pendiente')
     ]);
 
     // PROCESAMIENTO DE MÉTRICAS
@@ -95,10 +99,9 @@ export default function Page() {
       viajesBorradores: viajesBD?.filter(v => v.estatus === 'Borrador').length || 0
     });
 
-    // 2. PROCESAMIENTO DE ALERTAS (AHORA RESPETAN EL FILTRO)
+    // 2. PROCESAMIENTO DE ALERTAS
     const nuevasAlertas = [];
 
-    // Helper para evaluar si una fecha entra en el filtro
     const evaluarAlerta = (fechaString) => {
       const fVencimiento = new Date(fechaString + 'T00:00:00');
       const dias = Math.ceil((fVencimiento - ahora) / (1000 * 60 * 60 * 24));
@@ -107,12 +110,11 @@ export default function Page() {
       if (filtroActivo && fIni && fFinObj) {
         entraEnFiltro = (fVencimiento >= fIni && fVencimiento <= fFinObj);
       } else {
-        entraEnFiltro = dias <= 30; // Comportamiento por defecto (Todo el historial)
+        entraEnFiltro = dias <= 30; 
       }
       return { entraEnFiltro, dias };
     };
 
-    // Alertas Unidades
     unidades?.forEach(u => {
       const docs = [{ t: 'Seguro', f: u.vencimiento_seguro }, { t: 'Permiso SCT', f: u.vencimiento_sct }];
       docs.forEach(d => {
@@ -130,7 +132,6 @@ export default function Page() {
       });
     });
 
-    // Alertas Operadores
     operadores?.forEach(op => {
       if (!op.vencimiento_licencia) return;
       const { entraEnFiltro, dias } = evaluarAlerta(op.vencimiento_licencia);
@@ -145,7 +146,6 @@ export default function Page() {
       }
     });
 
-    // Alertas Facturas Agrupadas
     if (facturasPendientes) {
       const grupos = {};
       facturasPendientes.forEach(f => {
@@ -176,7 +176,6 @@ export default function Page() {
     setAlertas(nuevasAlertas.sort((a, b) => a.dias - b.dias));
   }
 
-  // Agregamos filtroActivo a las dependencias para que recalcule al instante
   useEffect(() => {
     if (sesion) obtenerDashboard(sesion.user.id);
   }, [sesion, fechaInicio, fechaFin, filtroActivo]);
@@ -208,7 +207,6 @@ export default function Page() {
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           
-          {/* ENCABEZADO GLOBAL (CON EL BOTÓN DE FILTRO) */}
           <header className="mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4 border-b border-slate-800 pb-6">
             <div>
               <h1 className="text-3xl font-black tracking-tighter uppercase italic leading-none">Panel <span className="text-blue-500">Principal</span></h1>
@@ -253,7 +251,6 @@ export default function Page() {
             </div>
           </header>
 
-          {/* MONITOR OPERATIVO */}
           <section className="mb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex items-center gap-3 mb-6">
               <Truck className="text-blue-500" size={20} />
@@ -281,10 +278,10 @@ export default function Page() {
             </div>
           </section>
 
-          {/* GRID INFERIOR DE 2 COLUMNAS */}
-<div className={`grid grid-cols-1 ${rolUsuario === 'administrador' ? 'lg:grid-cols-2' : ''} gap-12 border-t border-slate-800/50 pt-10`}>
+          {/* GRID INFERIOR DINÁMICO SEGÚN ROL */}
+          <div className={`grid grid-cols-1 ${rolUsuario === 'administrador' ? 'lg:grid-cols-2' : ''} gap-12 border-t border-slate-800/50 pt-10`}>
             
-            {/* BALANCE FINANCIERO (RESTRINGIDO A ADMINISTRADORES) */}
+            {/* BALANCE FINANCIERO - SOLO ADMINISTRADOR */}
             {rolUsuario === 'administrador' && (
               <section className="space-y-6">
                 <div className="flex items-center gap-3 mb-2">

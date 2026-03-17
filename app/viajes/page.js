@@ -26,6 +26,10 @@ export default function ViajesPage() {
   const [clientes, setClientes] = useState([]);
   const [perfilEmisor, setPerfilEmisor] = useState(null);
 
+  // === NUEVOS ESTADOS DE ARQUITECTURA ===
+  const [empresaId, setEmpresaId] = useState(null);
+  const [rolUsuario, setRolUsuario] = useState('miembro');
+
   const formInicial = {
     unidad_id: '', remolque_id: '', operador_id: '', origen_id: '', destino_id: '', 
     cliente_id: '', monto_flete: '', distancia_km: '', referencia: '', fecha_salida: new Date().toISOString().split('T')[0],
@@ -45,36 +49,56 @@ export default function ViajesPage() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setSesion(session);
-        cargarCatalogos(session.user.id);
-        obtenerViajes(session.user.id);
-        obtenerPerfilFiscal(session.user.id);
+        inicializarDatos(session.user.id);
       }
     });
   }, []);
 
-  async function obtenerPerfilFiscal(userId) {
-    const { data } = await supabase.from('perfil_emisor').select('*').eq('usuario_id', userId).single();
+  async function inicializarDatos(userId) {
+    setLoading(true);
+    // 1. OBTENER IDENTIFICADOR MATRIZ
+    const { data: perfilData } = await supabase
+      .from('perfiles')
+      .select('empresa_id, rol')
+      .eq('id', userId)
+      .single();
+
+    const idMaestro = perfilData?.empresa_id || userId;
+    setEmpresaId(idMaestro);
+    if (perfilData?.rol) setRolUsuario(perfilData.rol);
+
+    // 2. CARGAR TODO CON EL ID MAESTRO
+    await Promise.all([
+      cargarCatalogos(idMaestro),
+      obtenerViajes(idMaestro),
+      obtenerPerfilFiscal(idMaestro)
+    ]);
+    setLoading(false);
+  }
+
+  async function obtenerPerfilFiscal(idMaestro) {
+    const { data } = await supabase.from('perfil_emisor').select('*').eq('usuario_id', idMaestro).single();
     if (data) setPerfilEmisor(data);
   }
 
-  async function cargarCatalogos(userId) {
+  async function cargarCatalogos(idMaestro) {
     const [u, o, ub, m, cl, r] = await Promise.all([
-      supabase.from('unidades').select('*').eq('usuario_id', userId),
-      supabase.from('operadores').select('*').eq('usuario_id', userId),
-      supabase.from('ubicaciones').select('*').eq('usuario_id', userId),
-      supabase.from('mercancias').select('*').eq('usuario_id', userId),
-      supabase.from('clientes').select('*').eq('usuario_id', userId),
-      supabase.from('remolques').select('*').eq('usuario_id', userId)
+      supabase.from('unidades').select('*').eq('usuario_id', idMaestro),
+      supabase.from('operadores').select('*').eq('usuario_id', idMaestro),
+      supabase.from('ubicaciones').select('*').eq('usuario_id', idMaestro),
+      supabase.from('mercancias').select('*').eq('usuario_id', idMaestro),
+      supabase.from('clientes').select('*').eq('usuario_id', idMaestro),
+      supabase.from('remolques').select('*').eq('usuario_id', idMaestro)
     ]);
     setCatalogos({ unidades: u.data || [], operadores: o.data || [], ubicaciones: ub.data || [], mercancias: m.data || [], remolques: r.data || [] });
     setClientes(cl.data || []);
   }
 
-  async function obtenerViajes(userId) {
+  async function obtenerViajes(idMaestro) {
     const { data } = await supabase.from('viajes').select(`
         *, unidades(*), operadores(*), remolques(*), clientes(*),
         origen:ubicaciones!viajes_origen_id_fkey(*), destino:ubicaciones!viajes_destino_id_fkey(*)
-      `).eq('usuario_id', userId).order('created_at', { ascending: false });
+      `).eq('usuario_id', idMaestro).order('created_at', { ascending: false });
     setViajes(data || []);
   }
 
@@ -111,7 +135,7 @@ export default function ViajesPage() {
     try {
       await supabase.from('facturas').delete().eq('viaje_id', id);
       await supabase.from('viajes').delete().eq('id', id);
-      obtenerViajes(sesion.user.id);
+      obtenerViajes(empresaId);
     } catch (error) { alert("Error al eliminar: " + error.message); } 
     finally { setLoading(false); }
   };
@@ -128,7 +152,7 @@ export default function ViajesPage() {
       await supabase.from('viajes').update({ estatus: 'Cancelado' }).eq('id', viaje.id);
       await supabase.from('facturas').update({ estatus_pago: 'Cancelada' }).eq('viaje_id', viaje.id);
       alert("✅ Carta Porte CANCELADA exitosamente.");
-      obtenerViajes(sesion.user.id);
+      obtenerViajes(empresaId);
     } catch (error) { alert("Error al cancelar: " + error.message); } finally { setLoading(false); }
   };
 
@@ -295,7 +319,7 @@ export default function ViajesPage() {
 
       const invoiceData = {
         type: "I",
-        date: fechaHoraCFDI, // INYECCIÓN DIRECTA DE LA HORA CORREGIDA EN EL NODO PRINCIPAL
+        date: fechaHoraCFDI,
         customer: {
           legal_name: viaje.clientes.nombre, tax_id: viaje.clientes.rfc, tax_system: viaje.clientes.regimen_fiscal, address: { zip: viaje.clientes.codigo_postal }
         },
@@ -323,7 +347,7 @@ export default function ViajesPage() {
       const response = await fetch('https://www.facturapi.io/v2/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${facturapiKey}` }, body: JSON.stringify(invoiceData) });
       const res = await response.json();
       
-if (response.ok) {
+      if (response.ok) {
         await supabase.from('viajes').update({ 
           estatus: 'Emitido (Timbrado)', 
           folio_fiscal: res.uuid, 
@@ -340,12 +364,11 @@ if (response.ok) {
           sello_emisor: res.stamp?.signature, 
           sello_sat: res.stamp?.sat_signature, 
           cadena_original: res.stamp?.complement_string,
-          // === NUEVA LÍNEA: EXTRACCIÓN DEL CERTIFICADO SAT ===
           no_certificado_sat: res.stamp?.sat_cert_number
         }).eq('viaje_id', viaje.id);
 
         alert(`🎉 ¡CARTA PORTE TIMBRADA!\nUUID: ${res.uuid}`);
-        obtenerViajes(sesion.user.id);
+        obtenerViajes(empresaId);
       } else {
         alert(traducirErrorFacturapi(res));
       }
@@ -365,13 +388,13 @@ if (response.ok) {
         return { ...item, clave_sat: cat?.clave_sat, descripcion: cat?.descripcion, embalaje: cat?.clave_embalaje || '4G', material_peligroso: cat?.material_peligroso || false };
       });
 
-      // Limpieza preventiva: Si no es camión articulado, no mandamos remolque a la BD
       const remolqueLimpio = esCamionArticulado ? formData.remolque_id : null;
 
+      // === INYECCIÓN: TODO SE GUARDA A NOMBRE DE LA MATRIZ ===
       const payloadComun = {
         distancia_km: parseFloat(formData.distancia_km || 0), 
         unidad_id: formData.unidad_id, 
-        remolque_id: remolqueLimpio, // <- Usamos la variable limpia
+        remolque_id: remolqueLimpio, 
         operador_id: formData.operador_id, 
         origen_id: formData.origen_id, 
         destino_id: formData.destino_id,
@@ -382,7 +405,7 @@ if (response.ok) {
         monto_flete: parseFloat(formData.monto_flete || 0), 
         referencia: formData.referencia || '', 
         fecha_salida: formData.fecha_salida, 
-        usuario_id: sesion.user.id
+        usuario_id: empresaId // <-- CAMBIO CLAVE
       };
 
       if (editandoId) {
@@ -390,22 +413,25 @@ if (response.ok) {
         if (formData.monto_flete > 0 && formData.cliente_id) {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
           const { data: facExistente } = await supabase.from('facturas').select('id').eq('viaje_id', editandoId).single();
+          
           if (facExistente) {
             await supabase.from('facturas').update({ cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` }).eq('id', facExistente.id);
           } else {
-            const { data: maxFactura } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
+            // SECUENCIA DE FOLIOS COMPARTIDA
+            const { data: maxFactura } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
             let nuevoFolioFactura = (maxFactura?.[0]?.folio_interno || 0) + 1;
             const { data: viajeEditado } = await supabase.from('viajes').select('folio_interno').eq('id', editandoId).single();
 
             await supabase.from('facturas').insert([{ 
-              usuario_id: sesion.user.id, viaje_id: editandoId, folio_viaje: viajeEditado?.folio_interno, folio_interno: nuevoFolioFactura,
+              usuario_id: empresaId, viaje_id: editandoId, folio_viaje: viajeEditado?.folio_interno, folio_interno: nuevoFolioFactura,
               cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
             }]);
           }
         }
       } else {
         const nuevoIdCCP = generarIdCCP();
-        const { data: maxFolioData } = await supabase.from('viajes').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
+        // SECUENCIA DE FOLIOS DE VIAJE COMPARTIDA
+        const { data: maxFolioData } = await supabase.from('viajes').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
         let nuevoFolioViaje = (maxFolioData?.[0]?.folio_interno || 0) + 1;
 
         const { data: nuevoViaje, error: errorViaje } = await supabase.from('viajes').insert([{ ...payloadComun, folio_interno: nuevoFolioViaje, id_ccp: nuevoIdCCP, estatus: 'Borrador' }]).select().single();
@@ -413,17 +439,17 @@ if (response.ok) {
 
         if (formData.monto_flete > 0 && formData.cliente_id) {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
-          const { data: maxFacturaData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', sesion.user.id).order('folio_interno', { ascending: false }).limit(1);
+          const { data: maxFacturaData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
           let nuevoFolioFactura = (maxFacturaData?.[0]?.folio_interno || 0) + 1;
 
           await supabase.from('facturas').insert([{ 
-            usuario_id: sesion.user.id, viaje_id: nuevoViaje.id, folio_viaje: nuevoFolioViaje, folio_interno: nuevoFolioFactura,
+            usuario_id: empresaId, viaje_id: nuevoViaje.id, folio_viaje: nuevoFolioViaje, folio_interno: nuevoFolioFactura,
             cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
           }]);
         }
       }
 
-      cerrarModal(); obtenerViajes(sesion.user.id);
+      cerrarModal(); obtenerViajes(empresaId);
     } catch (err) { alert("Error: " + err.message); } finally { setLoading(false); }
   };
 
