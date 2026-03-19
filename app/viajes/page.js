@@ -7,6 +7,14 @@ import {
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 import { generarPDFCartaPorte } from '@/utils/PdfCartaPorte'; 
+import { z } from 'zod';
+
+// === ESCUDO DE VALIDACIÓN ZOD PARA VIAJES ===
+const viajeSchema = z.object({
+  distancia_km: z.number().positive("🛑 La distancia en KM debe ser estrictamente mayor a 0."),
+  monto_flete: z.number().positive( "🛑 El monto del flete no puede ser negativo o igual a 0."),
+  fecha_salida: z.string().min(10, "🛑 La fecha de salida es obligatoria.")
+});
 
 export default function ViajesPage() {
   const router = useRouter();
@@ -26,7 +34,6 @@ export default function ViajesPage() {
   const [clientes, setClientes] = useState([]);
   const [perfilEmisor, setPerfilEmisor] = useState(null);
 
-  // === NUEVOS ESTADOS DE ARQUITECTURA ===
   const [empresaId, setEmpresaId] = useState(null);
   const [rolUsuario, setRolUsuario] = useState('miembro');
 
@@ -38,9 +45,6 @@ export default function ViajesPage() {
 
   const [formData, setFormData] = useState(formInicial);
 
-  // ==============================================================
-  // LÓGICA SAT: DETECTAR SI EL CAMIÓN LLEVA REMOLQUE
-  // ==============================================================
   const unidadSeleccionadaObj = catalogos.unidades.find(u => u.id === formData.unidad_id);
   const configVehicularSAT = unidadSeleccionadaObj?.configuracion_vehicular || '';
   const esCamionArticulado = configVehicularSAT.includes('T') || configVehicularSAT.includes('R');
@@ -56,7 +60,6 @@ export default function ViajesPage() {
 
   async function inicializarDatos(userId) {
     setLoading(true);
-    // 1. OBTENER IDENTIFICADOR MATRIZ
     const { data: perfilData } = await supabase
       .from('perfiles')
       .select('empresa_id, rol')
@@ -67,7 +70,6 @@ export default function ViajesPage() {
     setEmpresaId(idMaestro);
     if (perfilData?.rol) setRolUsuario(perfilData.rol);
 
-    // 2. CARGAR TODO CON EL ID MAESTRO
     await Promise.all([
       cargarCatalogos(idMaestro),
       obtenerViajes(idMaestro),
@@ -81,7 +83,7 @@ export default function ViajesPage() {
     if (data) setPerfilEmisor(data);
   }
 
-async function cargarCatalogos(idMaestro) {
+  async function cargarCatalogos(idMaestro) {
     const [u, o, ub, m, cl, r] = await Promise.all([
       supabase.from('unidades').select('*').eq('usuario_id', idMaestro).eq('activo', true),
       supabase.from('operadores').select('*').eq('usuario_id', idMaestro).eq('activo', true),
@@ -140,14 +142,21 @@ async function cargarCatalogos(idMaestro) {
     finally { setLoading(false); }
   };
 
-  const cancelarViaje = async (viaje) => {
+const cancelarViaje = async (viaje) => {
     if (!confirm("¿Estás seguro de CANCELAR esta Carta Porte? Se enviará la petición al SAT y la factura quedará invalidada.")) return;
     setLoading(true);
     try {
       const { data: factura } = await supabase.from('facturas').select('facturapi_id').eq('viaje_id', viaje.id).single();
       if (factura && factura.facturapi_id) {
-        const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci";
-        await fetch(`https://www.facturapi.io/v2/invoices/${factura.facturapi_id}?motive=02`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${facturapiKey}` }});
+        // ATAQUE MITIGADO: Llamada al túnel seguro
+        await fetch('/api/facturapi', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            endpoint: `invoices/${factura.facturapi_id}?motive=02`,
+            method: 'DELETE'
+          })
+        });
       }
       await supabase.from('viajes').update({ estatus: 'Cancelado' }).eq('id', viaje.id);
       await supabase.from('facturas').update({ estatus_pago: 'Cancelada' }).eq('viaje_id', viaje.id);
@@ -156,15 +165,21 @@ async function cargarCatalogos(idMaestro) {
     } catch (error) { alert("Error al cancelar: " + error.message); } finally { setLoading(false); }
   };
 
-  const descargarXML = async (viajeId) => {
+
+const descargarXML = async (viajeId) => {
     setLoading(true);
     try {
       const { data: factura } = await supabase.from('facturas').select('facturapi_id').eq('viaje_id', viajeId).single();
       if (!factura || !factura.facturapi_id) throw new Error("No se encontró el registro de esta factura en el sistema.");
 
-      const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci";
-      const response = await fetch(`https://www.facturapi.io/v2/invoices/${factura.facturapi_id}/xml`, {
-        method: 'GET', headers: { 'Authorization': `Bearer ${facturapiKey}` }
+      // ATAQUE MITIGADO: Llamada al túnel seguro
+      const response = await fetch('/api/facturapi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: `invoices/${factura.facturapi_id}/xml`,
+          method: 'GET'
+        })
       });
 
       if (!response.ok) throw new Error("No se pudo descargar el XML del SAT.");
@@ -179,6 +194,8 @@ async function cargarCatalogos(idMaestro) {
       a.remove();
     } catch (err) { alert(err.message); } finally { setLoading(false); }
   };
+
+
 
   const traducirErrorFacturapi = (err) => {
     const errorStr = typeof err === 'object' ? JSON.stringify(err).toLowerCase() : String(err).toLowerCase();
@@ -200,7 +217,7 @@ async function cargarCatalogos(idMaestro) {
     return `❌ Error técnico:\n${typeof err === 'object' ? JSON.stringify(err) : err}`;
   };
 
-  const timbrarCartaPorte = async (viaje) => {
+const timbrarCartaPorte = async (viaje) => {
     try {
       if (!viaje.clientes?.rfc) throw new Error("Falta el RFC del Cliente. Revisa el catálogo de Clientes.");
       if (!viaje.clientes?.codigo_postal) throw new Error("Falta el Código Postal del Cliente.");
@@ -226,7 +243,6 @@ async function cargarCatalogos(idMaestro) {
       if (!op?.rfc) throw new Error(`El operador ${op?.nombre_completo} NO tiene RFC registrado.`);
       if (!op?.numero_licencia) throw new Error(`El operador ${op?.nombre_completo} NO tiene Número de Licencia.`);
 
-      // Armado de Mercancías
       const arregloMercanciasFacturapi = (viaje.mercancias_detalle || []).map((item, index) => {
         if (!item.clave_sat) throw new Error(`Falta la Clave SAT en el producto #${index + 1}`);
         if (!item.descripcion) throw new Error(`Falta la Descripción en el producto #${index + 1}`);
@@ -234,7 +250,7 @@ async function cargarCatalogos(idMaestro) {
         if (!item.peso_kg || parseFloat(item.peso_kg) <= 0) throw new Error(`Falta el Peso (KG) en el producto #${index + 1}`);
 
         let mercancia = {
-          BienesTransp: item.clave_sat,         
+          BienesTransp: item.clave_sat,        
           Descripcion: item.descripcion,        
           Cantidad: parseFloat(item.cantidad),  
           ClaveUnidad: item.embalaje,           
@@ -249,16 +265,11 @@ async function cargarCatalogos(idMaestro) {
         return mercancia;
       });
 
-      // ==============================================================
-      // LÓGICA DE TIEMPO REAL (OVERRIDE DE ZONA HORARIA) Y PESO
-      // ==============================================================
       const pesoTotalTimbre = (viaje.mercancias_detalle || []).reduce((acc, item) => acc + (Number(item.peso_kg) || 0), 0) || viaje.peso_total_kg || 1;
       
       const ahora = new Date();
-      // OVERRIDE: Forzamos la resta de 1 hora para neutralizar el bug del servidor
       ahora.setHours(ahora.getHours() - 1);
 
-      // Extracción manual estricta ISO 8601
       const año = ahora.getFullYear();
       const mes = String(ahora.getMonth() + 1).padStart(2, '0');
       const dia = String(ahora.getDate()).padStart(2, '0');
@@ -268,7 +279,6 @@ async function cargarCatalogos(idMaestro) {
 
       const fechaHoraCFDI = `${año}-${mes}-${dia}T${horas}:${minutos}:${segundos}`;
 
-      // Cálculo de llegada estimado basado en distancia
       const horasTrayecto = Math.ceil((viaje.distancia_km || 60) / 60) + 1;
       const llegadaDate = new Date(ahora.getTime() + (horasTrayecto * 60 * 60 * 1000));
       
@@ -281,9 +291,6 @@ async function cargarCatalogos(idMaestro) {
 
       const fechaHoraLlegadaCFDI = `${llegadaAño}-${llegadaMes}-${llegadaDia}T${llegadaHoras}:${llegadaMinutos}:${llegadaSegundos}`;
 
-      // ==============================================================
-      // VALIDACIÓN ESTRICTA DEL SAT PARA REMOLQUES
-      // ==============================================================
       const configSAT = u.configuracion_vehicular.trim().toUpperCase();
       const requiereRemolqueSAT = configSAT.includes('T') || configSAT.includes('R');
 
@@ -313,7 +320,7 @@ async function cargarCatalogos(idMaestro) {
 
       setLoading(true);
       
-      const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci"; 
+      // ELIMINADA LA LLAVE DE FACTURAPI
       const subtotal = Number((Number(viaje.monto_flete || 0) / 1.16).toFixed(2));
       const descripcionServicio = viaje.referencia ? `Servicio de Flete Nacional - Ref: ${viaje.referencia}` : "Servicio de Flete Nacional";
 
@@ -344,7 +351,16 @@ async function cargarCatalogos(idMaestro) {
         }]
       };
 
-      const response = await fetch('https://www.facturapi.io/v2/invoices', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${facturapiKey}` }, body: JSON.stringify(invoiceData) });
+      // ATAQUE MITIGADO: Llamada al túnel seguro
+      const response = await fetch('/api/facturapi', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({
+          endpoint: 'invoices',
+          method: 'POST',
+          payload: invoiceData
+        }) 
+      });
       const res = await response.json();
       
       if (response.ok) {
@@ -372,7 +388,6 @@ async function cargarCatalogos(idMaestro) {
       } else {
         alert(traducirErrorFacturapi(res));
       }
-
     } catch (err) { alert(err.message); } finally { setLoading(false); }
   };
 
@@ -390,7 +405,6 @@ async function cargarCatalogos(idMaestro) {
 
       const remolqueLimpio = esCamionArticulado ? formData.remolque_id : null;
 
-      // === INYECCIÓN: TODO SE GUARDA A NOMBRE DE LA MATRIZ ===
       const payloadComun = {
         distancia_km: parseFloat(formData.distancia_km || 0), 
         unidad_id: formData.unidad_id, 
@@ -405,11 +419,28 @@ async function cargarCatalogos(idMaestro) {
         monto_flete: parseFloat(formData.monto_flete || 0), 
         referencia: formData.referencia || '', 
         fecha_salida: formData.fecha_salida, 
-        usuario_id: empresaId // <-- CAMBIO CLAVE
+        usuario_id: empresaId
       };
 
+
+// === PASAMOS POR EL DETECTOR DE METALES (ZOD) ===
+      const validacion = viajeSchema.safeParse({
+        distancia_km: payloadComun.distancia_km,
+        monto_flete: payloadComun.monto_flete,
+        fecha_salida: payloadComun.fecha_salida
+      });
+
+      if (!validacion.success) {
+        setLoading(false);
+        const mensajeError = validacion.error.issues[0]?.message || "🛑 Revisa los datos ingresados.";
+        return alert(mensajeError);
+      }
+
+
       if (editandoId) {
+        // === MODO EDICIÓN ===
         await supabase.from('viajes').update(payloadComun).eq('id', editandoId);
+        
         if (formData.monto_flete > 0 && formData.cliente_id) {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
           const { data: facExistente } = await supabase.from('facturas').select('id').eq('viaje_id', editandoId).single();
@@ -417,33 +448,31 @@ async function cargarCatalogos(idMaestro) {
           if (facExistente) {
             await supabase.from('facturas').update({ cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` }).eq('id', facExistente.id);
           } else {
-            // SECUENCIA DE FOLIOS COMPARTIDA
-            const { data: maxFactura } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
-            let nuevoFolioFactura = (maxFactura?.[0]?.folio_interno || 0) + 1;
+            // Se inserta factura nueva omitiendo folio_interno
             const { data: viajeEditado } = await supabase.from('viajes').select('folio_interno').eq('id', editandoId).single();
-
             await supabase.from('facturas').insert([{ 
-              usuario_id: empresaId, viaje_id: editandoId, folio_viaje: viajeEditado?.folio_interno, folio_interno: nuevoFolioFactura,
+              usuario_id: empresaId, viaje_id: editandoId, folio_viaje: viajeEditado?.folio_interno,
               cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
             }]);
           }
         }
       } else {
+        // === MODO CREACIÓN (NUEVO VIAJE) ===
         const nuevoIdCCP = generarIdCCP();
-        // SECUENCIA DE FOLIOS DE VIAJE COMPARTIDA
-        const { data: maxFolioData } = await supabase.from('viajes').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
-        let nuevoFolioViaje = (maxFolioData?.[0]?.folio_interno || 0) + 1;
 
-        const { data: nuevoViaje, error: errorViaje } = await supabase.from('viajes').insert([{ ...payloadComun, folio_interno: nuevoFolioViaje, id_ccp: nuevoIdCCP, estatus: 'Borrador' }]).select().single();
+        // Se inserta viaje omitiendo folio_interno. La BD genera el folio y lo devuelve en .single()
+        const { data: nuevoViaje, error: errorViaje } = await supabase.from('viajes')
+          .insert([{ ...payloadComun, id_ccp: nuevoIdCCP, estatus: 'Borrador' }])
+          .select().single();
+          
         if (errorViaje) throw errorViaje;
 
         if (formData.monto_flete > 0 && formData.cliente_id) {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
-          const { data: maxFacturaData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
-          let nuevoFolioFactura = (maxFacturaData?.[0]?.folio_interno || 0) + 1;
-
+          
+          // Se inserta factura omitiendo folio_interno, enlazada por folio_viaje
           await supabase.from('facturas').insert([{ 
-            usuario_id: empresaId, viaje_id: nuevoViaje.id, folio_viaje: nuevoFolioViaje, folio_interno: nuevoFolioFactura,
+            usuario_id: empresaId, viaje_id: nuevoViaje.id, folio_viaje: nuevoViaje.folio_interno,
             cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
           }]);
         }
@@ -453,7 +482,6 @@ async function cargarCatalogos(idMaestro) {
     } catch (err) { alert("Error: " + err.message); } finally { setLoading(false); }
   };
 
-  // Resto de Helpers UI (getBadgeColor, filtrarPorPeriodo...) se mantienen igual
   const getBadgeColor = (estatus) => {
     switch(estatus) {
       case 'Emitido (Timbrado)': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
@@ -710,7 +738,6 @@ async function cargarCatalogos(idMaestro) {
                     </select>
                   </div>
 
-                  {/* EL RESTO DEL FORMULARIO SIGUE EXACTAMENTE IGUAL... */}
                   <div className="grid grid-cols-5 gap-4">
                     <select required className="col-span-2 w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.origen_id} onChange={e => setFormData({...formData, origen_id: e.target.value})}>
                       <option value="">Origen...</option>

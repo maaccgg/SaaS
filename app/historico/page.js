@@ -5,30 +5,33 @@ import { supabase } from '@/lib/supabaseClient';
 import Sidebar from '@/components/sidebar';
 import { 
   ShieldAlert, History, Eye, X, ArrowRightRight, 
-  Database, User, Clock, ShieldCheck, Lock, FileSearch
+  Database, User, Clock, ShieldCheck, Lock, FileSearch, Layers, Tag
 } from 'lucide-react';
+
+const TABS_CONFIG = [
+  { id: 'todos', label: 'Todos los Movimientos', tablas: [] },
+  { id: 'unidades', label: 'Unidades', tablas: ['unidades', 'operadores'] },
+  { id: 'facturas', label: 'Facturas', tablas: ['facturas'] },
+  { id: 'gastos', label: 'Gasto Operativo', tablas: ['mantenimientos'] },
+  { id: 'viajes', label: 'Viajes', tablas: ['viajes', 'mercancias', 'remolques', 'ubicaciones'] },
+  { id: 'sat', label: 'Info SAT (Carta Porte)', tablas: ['perfil_emisor', 'rutas', 'clientes'] }
+];
 
 export default function HistorialPage() {
   const router = useRouter();
   const [sesion, setSesion] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingTabla, setLoadingTabla] = useState(false);
   const [accesoAutorizado, setAccesoAutorizado] = useState(false);
   
+  const [activeTab, setActiveTab] = useState('todos');
   const [historial, setHistorial] = useState([]);
   const [modalDetalle, setModalDetalle] = useState(null);
 
-  // =========================================================================
-  // 1. EL GUARDIA DE RUTA (ROUTE GUARD)
-  // =========================================================================
   useEffect(() => {
     const verificarAcceso = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session) {
-        window.location.href = '/';
-        return;
-      }
-
+      if (!session) return window.location.href = '/';
       setSesion(session);
 
       const { data: perfil } = await supabase
@@ -37,46 +40,44 @@ export default function HistorialPage() {
         .eq('id', session.user.id)
         .single();
 
-      if (perfil?.rol !== 'administrador') {
-        router.push('/');
-        return;
-      }
+      if (perfil?.rol !== 'administrador') return router.push('/');
 
       setAccesoAutorizado(true);
-      cargarHistorial();
+      cargarHistorial('todos'); 
     };
-
     verificarAcceso();
   }, [router]);
 
-  // =========================================================================
-  // 2. CARGA DE DATOS DE LA BÓVEDA CON JOIN A PERFILES
-  // =========================================================================
-  async function cargarHistorial() {
-    setLoading(true);
+  async function cargarHistorial(tabId) {
+    setLoadingTabla(true);
     try {
-      // Inyectamos un JOIN para traer información del perfil asociado a ese usuario_id
-      const { data, error } = await supabase
+      let query = supabase
         .from('historial_movimientos')
-        .select(`
-          *,
-          perfiles (rol, empresa_id)
-        `)
+        .select(`*, perfiles (rol, empresa_id, nombre_completo, email)`)
         .order('fecha', { ascending: false })
         .limit(150); 
 
+      const selectedTab = TABS_CONFIG.find(t => t.id === tabId);
+      if (selectedTab && selectedTab.tablas.length > 0) {
+        query = query.in('tabla_afectada', selectedTab.tablas);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       setHistorial(data || []);
     } catch (err) {
       console.error("Error al cargar bóveda:", err.message);
     } finally {
       setLoading(false);
+      setLoadingTabla(false);
     }
   }
 
-  // =========================================================================
-  // 3. MOTOR DE TRADUCCIÓN DE EVIDENCIA (DIFF ENGINE)
-  // =========================================================================
+  const handleTabChange = (tabId) => {
+    setActiveTab(tabId);
+    cargarHistorial(tabId);
+  };
+
   const procesarDiferencias = (oldData, newData, accion) => {
     const cambios = [];
     const camposIgnorados = ['id', 'created_at', 'updated_at', 'usuario_id'];
@@ -94,15 +95,11 @@ export default function HistorialPage() {
         }
       }
     } else {
-      // UPDATE: Comparación exacta de claves
       const keys = new Set([...Object.keys(oldData || {}), ...Object.keys(newData || {})]);
       for (const key of keys) {
         if (camposIgnorados.includes(key)) continue;
-        
         const oldVal = oldData?.[key];
         const newVal = newData?.[key];
-        
-        // Solo agregamos a la lista si realmente cambiaron
         if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
           cambios.push({ 
             campo: key, 
@@ -115,13 +112,16 @@ export default function HistorialPage() {
     return cambios;
   };
 
+  const identificarRegistro = (datos) => {
+    if (!datos) return 'REGISTRO DESCONOCIDO';
+    const descriptor = datos.folio_interno || datos.folio_viaje || datos.folio || datos.num_viaje || datos.descripcion || datos.nombre || datos.nombre_completo || datos.cliente || datos.numero_economico || datos.placas || datos.razon_social;
+    return descriptor ? String(descriptor).toUpperCase() : 'DATOS INTERNOS (ID)';
+  };
+
   const formatearNombreCampo = (campo) => {
     return campo.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
-  // =========================================================================
-  // INTERFAZ GRÁFICA (UI)
-  // =========================================================================
   const getBudgeAccion = (accion) => {
     switch(accion) {
       case 'INSERT': return { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', label: 'Creación' };
@@ -135,7 +135,7 @@ export default function HistorialPage() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center gap-4">
         <Lock size={40} className="text-slate-800 animate-pulse" />
-        <p className="text-slate-600 font-black uppercase tracking-widest text-[10px]">Validando Credenciales de Seguridad...</p>
+        <p className="text-slate-600 font-black uppercase tracking-widest text-[10px]">Validando Credenciales...</p>
       </div>
     );
   }
@@ -146,7 +146,7 @@ export default function HistorialPage() {
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           
-          <header className="mb-10">
+          <header className="mb-8">
             <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none flex items-center gap-3">
                <ShieldCheck className="text-blue-500" size={32} /> Trazabilidad <span className="text-blue-500">Operativa</span>
             </h1>
@@ -155,14 +155,42 @@ export default function HistorialPage() {
             </p>
           </header>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
+          {/* ========================================================= */}
+          {/* DISEÑO DE PESTAÑAS (TABS) ACTUALIZADO */}
+          {/* ========================================================= */}
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide w-full mb-8">
+            {TABS_CONFIG.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap border
+                ${activeTab === tab.id 
+                  ? 'bg-blue-600 text-white shadow-md border-transparent' 
+                  : 'bg-slate-900/50 text-slate-500 border-transparent hover:bg-slate-800/50'}`}
+              >
+                {activeTab === tab.id && <Layers size={14} />}
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl relative">
+            {loadingTabla && (
+              <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                <div className="flex items-center gap-3 text-blue-500 font-black uppercase tracking-widest text-xs">
+                  <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+                  Filtrando Evidencia...
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-[13px]">
                 <thead>
                   <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-[12px] font-semibold uppercase tracking-wider">
                     <th className="p-4 pl-8 font-normal">Fecha y Hora</th>
                     <th className="p-4 font-normal">Acción</th>
-                    <th className="p-4 font-normal">Módulo</th>
+                    <th className="p-4 font-normal">Módulo / Elemento</th>
                     <th className="p-4 font-normal">Autor del Movimiento</th>
                     <th className="p-4 pr-8 text-right font-normal">Evidencia</th>
                   </tr>
@@ -174,44 +202,53 @@ export default function HistorialPage() {
                       year: 'numeric', month: 'short', day: '2-digit', 
                       hour: '2-digit', minute: '2-digit', second: '2-digit' 
                     });
+                    
+                    const datosReferencia = mov.datos_nuevos || mov.datos_anteriores;
+                    const descriptorAbreviado = identificarRegistro(datosReferencia);
 
-                    // Identificación del Usuario Legible
-                    const rolUsuario = mov.perfiles?.rol ? mov.perfiles.rol.toUpperCase() : 'DESCONOCIDO';
-                    const idCorto = mov.usuario_id ? mov.usuario_id.split('-')[0] : 'S/I';
-                    const nombreUsuario = `${rolUsuario} (${idCorto})`;
+                    const nombreUsuario = mov.perfiles?.nombre_completo ? mov.perfiles.nombre_completo : 'Usuario Eliminado/Sistema';
+                    const emailUsuario = mov.perfiles?.email ? mov.perfiles.email : 'N/A';
+                    const rolUsuario = mov.perfiles?.rol ? mov.perfiles.rol : 'SISTEMA';
 
                     return (
                       <tr key={mov.id} className="hover:bg-slate-800/30 transition-colors group">
-                        
                         <td className="p-4 pl-8 align-middle">
                           <div className="flex items-center gap-2 text-slate-300 font-mono text-[11px]">
                             <Clock size={12} className="text-slate-500" />
                             {fechaLocal}
                           </div>
                         </td>
-
                         <td className="p-4 align-middle">
                           <span className={`inline-flex px-3 py-1 rounded-lg border uppercase tracking-widest text-[9px] font-black items-center gap-1 ${badge.bg} ${badge.border} ${badge.text}`}>
                             {badge.label}
                           </span>
                         </td>
-
                         <td className="p-4 align-middle">
-                          <div className="flex items-center gap-2 text-white font-bold uppercase text-[11px] tracking-wider">
-                            <Database size={14} className="text-blue-500" />
-                            {mov.tabla_afectada}
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2 text-white font-bold uppercase text-[11px] tracking-wider">
+                              <Database size={12} className="text-blue-500" />
+                              {mov.tabla_afectada}
+                            </div>
+                            <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest truncate max-w-[200px]" title={descriptorAbreviado}>
+                              Ref: {descriptorAbreviado}
+                            </span>
                           </div>
                         </td>
-
+                        
                         <td className="p-4 align-middle">
-                           <div className="flex items-center gap-2">
-                             <User size={12} className="text-slate-500" />
-                             <span className="text-slate-300 font-bold text-[10px] tracking-widest uppercase">
+                           <div className="flex flex-col">
+                             <span className="text-white font-bold capitalize text-[11px] truncate max-w-[150px]" title={nombreUsuario}>
                                {nombreUsuario}
+                             </span>
+                             <span className="text-slate-500 font-mono text-[9px] lowercase truncate max-w-[150px]">
+                               {emailUsuario}
+                             </span>
+                             <span className="text-blue-400 font-black text-[8px] uppercase tracking-widest mt-0.5">
+                               {rolUsuario}
                              </span>
                            </div>
                         </td>
-
+                        
                         <td className="p-4 pr-8 align-middle text-right">
                           <button 
                             onClick={() => setModalDetalle(mov)} 
@@ -221,16 +258,15 @@ export default function HistorialPage() {
                             <FileSearch size={16} />
                           </button>
                         </td>
-
                       </tr>
                     );
                   })}
-
                   {historial.length === 0 && (
                     <tr>
                       <td colSpan="5" className="py-20 text-center">
                         <History size={32} className="mx-auto text-slate-700 mb-3" />
-                        <p className="text-slate-500 uppercase tracking-widest text-sm">No se han registrado movimientos recientes.</p>
+                        <p className="text-slate-500 uppercase tracking-widest text-sm font-bold">Sin evidencia registrada</p>
+                        <p className="text-slate-600 uppercase tracking-widest text-[10px] mt-1">No hay movimientos recientes para este módulo.</p>
                       </td>
                     </tr>
                   )}
@@ -239,54 +275,53 @@ export default function HistorialPage() {
             </div>
           </div>
 
-          {/* ========================================================================= */}
-          {/* MODAL DE INSPECCIÓN SIMPLIFICADA (DIFF) */}
-          {/* ========================================================================= */}
           {modalDetalle && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm" onClick={() => setModalDetalle(null)} />
               
               <div className="relative bg-slate-900 border border-slate-800 w-full max-w-4xl max-h-[90vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95">
-                
                 <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-950">
                   <div>
                     <h3 className="text-lg font-black text-white uppercase italic flex items-center gap-2">
                       <ShieldAlert className="text-orange-500" size={20} /> 
                       Reporte de <span className="text-blue-500">Alteración</span>
                     </h3>
-                    <p className="text-[10px] text-slate-500 font-mono mt-1">Ref: {modalDetalle.registro_id}</p>
+                    <p className="text-[10px] text-slate-500 font-mono mt-1">Ref UUID: {modalDetalle.registro_id}</p>
                   </div>
                   <button onClick={() => setModalDetalle(null)} className="text-slate-500 hover:text-white bg-slate-900 p-2 rounded-full transition-colors"><X size={20}/></button>
                 </div>
 
                 <div className="p-6 overflow-y-auto flex-1 bg-slate-900">
                   
-                  <div className="flex items-center gap-4 mb-6 bg-slate-950 border border-slate-800 p-4 rounded-xl">
-                    <div className="flex-1">
-                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Módulo Afectado</p>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                    <div>
+                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 flex items-center gap-1"><Database size={10}/> Módulo</p>
                       <p className="text-sm font-bold text-white uppercase">{modalDetalle.tabla_afectada}</p>
                     </div>
-                    <div className="flex-1 border-l border-slate-800 pl-4">
+                    <div className="border-l border-slate-800 pl-4">
+                      <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1 flex items-center gap-1"><Tag size={10}/> Registro Exacto</p>
+                      <p className="text-[11px] font-black text-blue-400 uppercase tracking-widest truncate" title={identificarRegistro(modalDetalle.datos_nuevos || modalDetalle.datos_anteriores)}>
+                        {identificarRegistro(modalDetalle.datos_nuevos || modalDetalle.datos_anteriores)}
+                      </p>
+                    </div>
+                    <div className="border-l border-slate-800 pl-4">
                       <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Tipo de Movimiento</p>
                       <span className={`inline-flex px-2 py-0.5 rounded uppercase tracking-widest text-[9px] font-black ${getBudgeAccion(modalDetalle.accion).bg} ${getBudgeAccion(modalDetalle.accion).text}`}>
                         {getBudgeAccion(modalDetalle.accion).label}
                       </span>
                     </div>
-                    <div className="flex-1 border-l border-slate-800 pl-4">
+                    <div className="border-l border-slate-800 pl-4">
                       <p className="text-[9px] text-slate-500 font-black uppercase tracking-widest mb-1">Autor</p>
-                      <p className="text-xs font-bold text-slate-300 uppercase tracking-widest">
-                        {modalDetalle.perfiles?.rol ? modalDetalle.perfiles.rol : 'Desconocido'} 
-                        <span className="text-[9px] font-mono text-slate-500 ml-1">({modalDetalle.usuario_id?.split('-')[0]})</span>
+                      <p className="text-[11px] font-bold text-slate-300 uppercase tracking-widest truncate">
+                        {modalDetalle.perfiles?.nombre_completo || 'Sistema'}
                       </p>
                     </div>
                   </div>
 
-                  {/* TABLA COMPARATIVA SIMPLIFICADA */}
                   <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
                     <div className="bg-slate-900 px-6 py-3 border-b border-slate-800">
                       <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest">Detalle de Campos Modificados</p>
                     </div>
-                    
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                         <thead>
@@ -299,30 +334,15 @@ export default function HistorialPage() {
                         <tbody className="divide-y divide-slate-800/30">
                           {procesarDiferencias(modalDetalle.datos_anteriores, modalDetalle.datos_nuevos, modalDetalle.accion).map((cambio, index) => (
                             <tr key={index} className="hover:bg-slate-900/50 transition-colors">
-                              <td className="p-4 text-[11px] font-bold text-slate-300 uppercase tracking-wider">
-                                {formatearNombreCampo(cambio.campo)}
-                              </td>
-                              <td className="p-4 text-[12px] font-mono text-orange-200/70 max-w-[200px] truncate" title={cambio.ant}>
-                                {cambio.ant}
-                              </td>
-                              <td className="p-4 text-[12px] font-mono text-emerald-300 max-w-[200px] truncate" title={cambio.nvo}>
-                                {cambio.nvo}
-                              </td>
+                              <td className="p-4 text-[11px] font-bold text-slate-300 uppercase tracking-wider">{formatearNombreCampo(cambio.campo)}</td>
+                              <td className="p-4 text-[12px] font-mono text-orange-200/70 max-w-[200px] truncate" title={cambio.ant}>{cambio.ant}</td>
+                              <td className="p-4 text-[12px] font-mono text-emerald-300 max-w-[200px] truncate" title={cambio.nvo}>{cambio.nvo}</td>
                             </tr>
                           ))}
-                          
-                          {procesarDiferencias(modalDetalle.datos_anteriores, modalDetalle.datos_nuevos, modalDetalle.accion).length === 0 && (
-                            <tr>
-                              <td colSpan="3" className="p-8 text-center text-slate-500 text-[10px] uppercase tracking-widest italic">
-                                No se detectaron alteraciones en campos de valor.
-                              </td>
-                            </tr>
-                          )}
                         </tbody>
                       </table>
                     </div>
                   </div>
-
                 </div>
               </div>
             </div>

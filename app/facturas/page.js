@@ -9,6 +9,16 @@ import {
 import Sidebar from '@/components/sidebar';
 import TarjetaDato from '@/components/tarjetaDato';
 import { generarFacturaPDF } from '@/utils/PdfFactura'; 
+import { z } from 'zod';
+
+// === ESCUDO DE VALIDACIÓN ZOD ===
+const facturaSchema = z.object({
+  cliente: z.string().min(2, "El nombre del cliente es obligatorio."),
+  monto_total: z.number().positive("El monto total debe ser estrictamente mayor a $0."),
+  metodo_pago: z.enum(["PUE", "PPD"], { errorMap: () => ({ message: "Método de pago inválido detectado." }) }),
+  forma_pago: z.string().min(2, "La forma de pago es obligatoria."),
+  fecha_viaje: z.string().min(10, "La fecha de emisión es obligatoria o tiene un formato incorrecto.")
+});
 
 function FacturasContenido() {
   const searchParams = useSearchParams();
@@ -18,7 +28,6 @@ function FacturasContenido() {
   const [loading, setLoading] = useState(false);
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   
-  // ESTADOS DE FILTROS Y PERIODO
   const [mostrarFiltro, setMostrarFiltro] = useState(false);
   const [fechaInicio, setFechaInicio] = useState('');
   const [fechaFin, setFechaFin] = useState('');
@@ -29,7 +38,6 @@ function FacturasContenido() {
   const [clientes, setClientes] = useState([]);
   const [perfilEmisor, setPerfilEmisor] = useState(null);
   
-  // === NUEVOS ESTADOS DE ARQUITECTURA ===
   const [empresaId, setEmpresaId] = useState(null);
   const [rolUsuario, setRolUsuario] = useState('miembro');
 
@@ -39,7 +47,6 @@ function FacturasContenido() {
     fecha_vencimiento: '', forma_pago: '99', metodo_pago: 'PPD'
   });
 
-  // 1. INICIALIZACIÓN DE SESIÓN (Solo corre al abrir la pantalla)
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) window.location.href = "/";
@@ -50,7 +57,6 @@ function FacturasContenido() {
     });
   }, []);
 
-  // 2. RECARGA DINÁMICA POR FILTROS (Solo corre si ya tenemos el ADN de la empresa)
   useEffect(() => {
     if (empresaId) obtenerDatos(empresaId);
   }, [fechaInicio, fechaFin, filtroActivo, viajeIdHighlight]);
@@ -74,7 +80,6 @@ function FacturasContenido() {
     }
   }, [formData.metodo_pago]);
 
-  // === FUNCIÓN MAESTRA DE INICIALIZACIÓN ===
   async function inicializarDatos(userId) {
     setLoading(true);
     const { data: perfilData } = await supabase
@@ -100,7 +105,7 @@ function FacturasContenido() {
     if (data) setPerfilEmisor(data);
   }
 
-async function obtenerClientes(idMaestro) {
+  async function obtenerClientes(idMaestro) {
     const { data } = await supabase.from('clientes')
       .select('*')
       .eq('usuario_id', idMaestro)
@@ -114,7 +119,7 @@ async function obtenerClientes(idMaestro) {
     let query = supabase
       .from('facturas')
       .select('*') 
-      .eq('usuario_id', idMaestro) // <-- CONSULTA UNIFICADA
+      .eq('usuario_id', idMaestro)
       .order('folio_interno', { ascending: false })
       .order('created_at', { ascending: false });
 
@@ -138,14 +143,18 @@ async function obtenerClientes(idMaestro) {
     setLoading(false);
   }
 
-  const descargarXML = async (facturapi_id, cliente_nombre) => {
+const descargarXML = async (facturapi_id, cliente_nombre) => {
     if (!facturapi_id) return alert("Esta factura aún no está timbrada en el SAT.");
-    const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci"; 
     
     try {
-      const response = await fetch(`https://www.facturapi.io/v2/invoices/${facturapi_id}/xml`, {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${facturapiKey}` }
+      // ATAQUE MITIGADO: Llamada al túnel seguro
+      const response = await fetch('/api/facturapi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: `invoices/${facturapi_id}/xml`,
+          method: 'GET'
+        })
       });
 
       if (!response.ok) throw new Error("No se pudo obtener el XML del SAT");
@@ -164,15 +173,12 @@ async function obtenerClientes(idMaestro) {
     }
   };
 
-  const timbrarFactura = async (factura) => {
+const timbrarFactura = async (factura) => {
     const clienteData = clientes.find(c => c.nombre === factura.cliente);
     if (!clienteData) {
       alert("⚠️ Error: No se encontró la información fiscal del cliente. Verifica tu catálogo de clientes.");
       return;
     }
-
-    const facturapiKey = "sk_test_sBNjdoZ5A1UcJVmQ2KUisCQBpiD8MPFecYABBhRYci"; 
-    const apiUrl = 'https://www.facturapi.io/v2/invoices';
 
     const totalInput = Number(factura.monto_total);
     const subtotal = Number((totalInput / 1.16).toFixed(2));
@@ -192,8 +198,15 @@ async function obtenerClientes(idMaestro) {
 
     setLoading(true);
     try {
-      const response = await fetch(apiUrl, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${facturapiKey}` }, body: JSON.stringify(invoiceData)
+      // ATAQUE MITIGADO: Llamada al túnel seguro
+      const response = await fetch('/api/facturapi', {
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({
+          endpoint: 'invoices',
+          method: 'POST',
+          payload: invoiceData
+        })
       });
       const res = await response.json();
 
@@ -215,37 +228,53 @@ async function obtenerClientes(idMaestro) {
 
         if (supabaseError) throw supabaseError;
         alert(`🎉 ¡FACTURA TIMBRADA CON ÉXITO!\n\nUUID: ${uuidReal}`);
-        obtenerDatos(empresaId); // <-- RECARGA UNIFICADA
+        obtenerDatos(empresaId); 
       } else {
         alert(`❌ Error del SAT:\n${res.message || "Error desconocido"}`);
       }
     } catch (err) { alert("Error de red:\n" + err.message); } finally { setLoading(false); }
   };
 
-  const registrarFactura = async (e) => {
+const registrarFactura = async (e) => {
     e.preventDefault();
     if (!formData.cliente_id || !formData.monto_total) return;
     setLoading(true);
 
     try {
-      // 1. Buscamos el máximo folio actual con el ID de la Empresa
-      const { data: maxFolioData } = await supabase.from('facturas').select('folio_interno').eq('usuario_id', empresaId).order('folio_interno', { ascending: false }).limit(1);
-      let nuevoFolio = (maxFolioData?.[0]?.folio_interno || 0) + 1;
-
       const clienteSeleccionado = clientes.find(c => c.id === formData.cliente_id);
 
+      // 1. Preparamos los datos crudos (lo que el usuario escribió)
+      const datosCrudos = {
+        cliente: clienteSeleccionado?.nombre || "",
+        monto_total: parseFloat(formData.monto_total),
+        metodo_pago: formData.metodo_pago,
+        forma_pago: formData.forma_pago,
+        fecha_viaje: formData.fecha_viaje
+      };
+
+      // 2. PASAMOS POR EL DETECTOR DE METALES (SAFE PARSE)
+      // Esto no rompe la app, solo nos devuelve un reporte de inspección
+      const validacion = facturaSchema.safeParse(datosCrudos);
+
+      if (!validacion.success) {
+        setLoading(false);
+        // Mostramos el primer error que Zod haya encontrado
+        const mensajeError = validacion.error.issues[0]?.message || "🛑 Revisa los datos ingresados.";
+        return alert(mensajeError);
+      }
+
+      // 3. Si Zod aprueba (success: true), insertamos en Supabase con los datos ultra-limpios
       const { error } = await supabase.from('facturas').insert([{ 
-          folio_interno: nuevoFolio, 
-          cliente: clienteSeleccionado.nombre,
-          monto_total: parseFloat(formData.monto_total), 
+          cliente: validacion.data.cliente,
+          monto_total: validacion.data.monto_total, 
           folio_fiscal: formData.folio_fiscal,
           ruta: formData.ruta,
-          fecha_viaje: formData.fecha_viaje,
+          fecha_viaje: validacion.data.fecha_viaje,
           fecha_vencimiento: formData.fecha_vencimiento,
-          forma_pago: formData.forma_pago,
-          metodo_pago: formData.metodo_pago,
+          forma_pago: validacion.data.forma_pago,
+          metodo_pago: validacion.data.metodo_pago,
           estatus_pago: 'Pendiente',
-          usuario_id: empresaId // <-- INYECCIÓN DE ADN
+          usuario_id: empresaId
         }]);
 
       if (error) throw error;

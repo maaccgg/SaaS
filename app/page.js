@@ -5,7 +5,7 @@ import TarjetaDato from '@/components/tarjetaDato';
 import Sidebar from '@/components/sidebar';
 import { 
   Bell, Calendar, DollarSign, TrendingUp, AlertTriangle, 
-  ChevronRight, Search, ChevronDown, Truck, User 
+  ChevronRight, Search, ChevronDown, Truck, User, Loader2 
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -18,9 +18,8 @@ export default function Page() {
   const [busqueda, setBusqueda] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("todos");
   
-  // ESTADOS DEL FILTRO GLOBAL
   const [mostrarFiltro, setMostrarFiltro] = useState(false);
-  const [filtroActivo, setFiltroActivo] = useState(true); // Activado por defecto en el mes actual
+  const [filtroActivo, setFiltroActivo] = useState(true); 
   
   const hoy = new Date();
   const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString().split('T')[0];
@@ -35,38 +34,90 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // === NUEVOS ESTADOS DE ARQUITECTURA ===
   const [empresaId, setEmpresaId] = useState(null);
   const [rolUsuario, setRolUsuario] = useState('miembro');
 
+  // =====================================================================
+  // 1. INICIALIZACIÓN Y DETECCIÓN DE SESIÓN
+  // =====================================================================
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSesion(session);
-      setLoading(false);
+      setLoading(false); // <-- ESTO LIBERA LA PANTALLA DE CARGA
     });
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSesion(session);
+      if (!session) setLoading(false);
     });
+
     return () => subscription.unsubscribe();
   }, []);
 
+  // =====================================================================
+  // 2. CARGA DEL DASHBOARD (SOLO SI HAY SESIÓN)
+  // =====================================================================
+  useEffect(() => {
+    if (sesion) {
+      obtenerDashboard(sesion.user.id);
+    }
+  }, [sesion, fechaInicio, fechaFin, filtroActivo]);
+
+  // =====================================================================
+  // 3. MANEJADOR DE LOGIN CON BLINDAJE INSTITUCIONAL
+  // =====================================================================
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError) {
+      alert("Error de acceso: " + authError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: perfil } = await supabase
+      .from('perfiles')
+      .select('activo')
+      .eq('id', authData.user.id)
+      .single();
+
+    if (perfil && perfil.activo === false) {
+      await supabase.auth.signOut();
+      alert("🛑 ACCESO DENEGADO: Cuenta inactiva. Por favor ponte en contacto con el administrador");
+      setLoading(false);
+      return;
+    }
+  };
+
   async function obtenerDashboard(userId) {
+    setLoading(true);
     const ahora = new Date();
     const fIni = filtroActivo && fechaInicio ? new Date(fechaInicio + 'T00:00:00') : null;
     const fFinObj = filtroActivo && fechaFin ? new Date(fechaFin + 'T23:59:59') : null;
     
-    // 0. VERIFICAR ROL DEL USUARIO Y NÚCLEO DE DATOS
     const { data: perfilData } = await supabase
       .from('perfiles')
-      .select('empresa_id, rol')
+      .select('empresa_id, rol, activo')
       .eq('id', userId)
       .single();
+
+    // Expulsión si la cuenta se desactiva mientras está logueado
+    if (perfilData && perfilData.activo === false) {
+      await supabase.auth.signOut();
+      window.location.href = '/';
+      return;
+    }
 
     const idMaestro = perfilData?.empresa_id || userId;
     setEmpresaId(idMaestro);
     if (perfilData?.rol) setRolUsuario(perfilData.rol);
 
-    // 1. CONSTRUCCIÓN DE CONSULTAS (MÉTRICAS BASADAS EN EL ID MAESTRO)
     let queryFacturas = supabase.from('facturas').select('monto_total').eq('usuario_id', idMaestro).eq('estatus_pago', 'Pagado');
     let queryGastos = supabase.from('mantenimientos').select('costo').eq('usuario_id', idMaestro);
     let queryViajes = supabase.from('viajes').select('estatus').eq('usuario_id', idMaestro);
@@ -77,7 +128,6 @@ export default function Page() {
       queryViajes = queryViajes.gte('fecha_salida', fechaInicio).lte('fecha_salida', fechaFin);
     }
 
-    // EJECUCIÓN CONCURRENTE (Rendimiento Optimizado)
     const [
       { data: facturasPagadas }, { data: gastosBD }, { data: viajesBD },
       { data: unidades }, { data: operadores }, { data: facturasPendientes }
@@ -88,7 +138,6 @@ export default function Page() {
       supabase.from('facturas').select('cliente, fecha_vencimiento, monto_total').eq('usuario_id', idMaestro).eq('estatus_pago', 'Pendiente')
     ]);
 
-    // PROCESAMIENTO DE MÉTRICAS
     const totalIngresos = facturasPagadas?.reduce((acc, curr) => acc + (Number(curr.monto_total) || 0), 0) || 0;
     const totalGastos = gastosBD?.reduce((acc, curr) => acc + (Number(curr.costo) || 0), 0) || 0;
     
@@ -99,13 +148,10 @@ export default function Page() {
       viajesBorradores: viajesBD?.filter(v => v.estatus === 'Borrador').length || 0
     });
 
-    // 2. PROCESAMIENTO DE ALERTAS
     const nuevasAlertas = [];
-
     const evaluarAlerta = (fechaString) => {
       const fVencimiento = new Date(fechaString + 'T00:00:00');
       const dias = Math.ceil((fVencimiento - ahora) / (1000 * 60 * 60 * 24));
-      
       let entraEnFiltro = false;
       if (filtroActivo && fIni && fFinObj) {
         entraEnFiltro = (fVencimiento >= fIni && fVencimiento <= fFinObj);
@@ -120,7 +166,6 @@ export default function Page() {
       docs.forEach(d => {
         if (!d.f) return;
         const { entraEnFiltro, dias } = evaluarAlerta(d.f);
-        
         if (entraEnFiltro) {
           nuevasAlertas.push({
             id: `U-${u.numero_economico}-${d.t}`, titulo: `${d.t}: ${u.numero_economico}`,
@@ -135,7 +180,6 @@ export default function Page() {
     operadores?.forEach(op => {
       if (!op.vencimiento_licencia) return;
       const { entraEnFiltro, dias } = evaluarAlerta(op.vencimiento_licencia);
-      
       if (entraEnFiltro) {
         nuevasAlertas.push({
           id: `OP-${op.nombre_completo}`, titulo: `Licencia: ${op.nombre_completo}`,
@@ -151,7 +195,6 @@ export default function Page() {
       facturasPendientes.forEach(f => {
         if (!f.fecha_vencimiento) return;
         const { entraEnFiltro, dias } = evaluarAlerta(f.fecha_vencimiento);
-        
         if (entraEnFiltro) {
           if (!grupos[f.cliente]) grupos[f.cliente] = { v: 0, pv: 0, m: 0, min: dias };
           if (dias < 0) { grupos[f.cliente].v += 1; grupos[f.cliente].m += Number(f.monto_total); }
@@ -159,7 +202,6 @@ export default function Page() {
           if (dias < grupos[f.cliente].min) grupos[f.cliente].min = dias;
         }
       });
-      
       Object.keys(grupos).forEach(c => {
         const info = grupos[c];
         const msg = [];
@@ -172,13 +214,9 @@ export default function Page() {
         });
       });
     }
-    
     setAlertas(nuevasAlertas.sort((a, b) => a.dias - b.dias));
+    setLoading(false);
   }
-
-  useEffect(() => {
-    if (sesion) obtenerDashboard(sesion.user.id);
-  }, [sesion, fechaInicio, fechaFin, filtroActivo]);
 
   const alertasFiltradas = alertas.filter(a => {
     const cumpleBusqueda = a.titulo.toLowerCase().includes(busqueda.toLowerCase()) || a.subtitulo.toLowerCase().includes(busqueda.toLowerCase());
@@ -186,20 +224,18 @@ export default function Page() {
     return cumpleBusqueda && cumpleFiltro;
   });
 
-  if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-blue-500 font-black uppercase tracking-widest">Iniciando...</div>;
+  if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-blue-500 font-black uppercase tracking-widest"><Loader2 className="animate-spin mr-2" /> Cargando...</div>;
 
   if (!sesion) return (
     <div className="flex items-center justify-center min-h-screen bg-slate-950 text-white p-6">
-
-      <form onSubmit={(e) => { e.preventDefault(); supabase.auth.signInWithPassword({ email, password }); }} className="bg-slate-900 p-10 rounded-[2.5rem] border border-slate-800 w-full max-w-md shadow-2xl">
+      <form onSubmit={handleLogin} className="bg-slate-900 p-10 rounded-[2.5rem] border border-slate-800 w-full max-w-md shadow-2xl">
         <h2 className="text-3xl font-black mb-8 text-blue-500 italic uppercase text-center tracking-tighter">Inicia <span className="text-white">Sesión</span></h2>
         <div className="space-y-4">
           <input type="email" placeholder="Usuario" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-white" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input type="password" placeholder="Contraseña" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-white" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black uppercase tracking-widest transition-all">Entrar</button>
+          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black uppercase tracking-widest transition-all">Entrar</button>
         </div>
       </form>
-      
     </div>
   );
 
@@ -260,37 +296,27 @@ export default function Page() {
                 {filtroActivo ? 'Despachos del Periodo' : 'Histórico de Despachos'}
               </h2>
             </div>
-            
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="bg-slate-900 border border-slate-800 p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden group hover:border-blue-500/30 transition-all">
                 <div className="absolute -right-6 -top-6 bg-slate-800/20 w-28 h-28 rounded-full transition-transform group-hover:scale-150 duration-500" />
                 <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2 relative z-10">Total de Viajes</p>
-                <h3 className="text-4xl font-black text-white italic tracking-tighter relative z-10">
-                  {metricas.viajesTotales}
-                </h3>
+                <h3 className="text-4xl font-black text-white italic tracking-tighter relative z-10">{metricas.viajesTotales}</h3>
               </div>
-              
               <div className="bg-slate-900 border border-emerald-500/20 p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden group hover:border-emerald-500/40 transition-all">
                 <div className="absolute -right-6 -top-6 bg-emerald-500/10 w-28 h-28 rounded-full transition-transform group-hover:scale-150 duration-500" />
                 <p className="text-[11px] font-black text-emerald-500/70 uppercase tracking-widest mb-2 relative z-10">Timbrados</p>
-                <h3 className="text-4xl font-black text-emerald-400 italic tracking-tighter relative z-10">
-                  {metricas.viajesTimbrados}
-                </h3>
+                <h3 className="text-4xl font-black text-emerald-400 italic tracking-tighter relative z-10">{metricas.viajesTimbrados}</h3>
               </div>
             </div>
           </section>
 
-          {/* GRID INFERIOR DINÁMICO SEGÚN ROL */}
           <div className={`grid grid-cols-1 ${rolUsuario === 'administrador' ? 'lg:grid-cols-2' : ''} gap-12 border-t border-slate-800/50 pt-10`}>
-            
-            {/* BALANCE FINANCIERO - SOLO ADMINISTRADOR */}
             {rolUsuario === 'administrador' && (
               <section className="space-y-6">
                 <div className="flex items-center gap-3 mb-2">
                   <TrendingUp className="text-green-500" size={24} />
                   <h2 className="text-[20px] font-black text-slate-400 uppercase tracking-[0.2em]">Balance Financiero</h2>
                 </div>
-
                 <div className="grid grid-cols-1 gap-4">
                   <div className="grid grid-cols-2 gap-4">
                     <TarjetaDato titulo="Ingresos" valor={`$${metricas.ingresos.toLocaleString()}`} color="blue" />
@@ -307,7 +333,6 @@ export default function Page() {
               </section>
             )}
 
-            {/* AVISOS DEL SISTEMA */}
             <section className="space-y-6">
               <div className="flex flex-col gap-4">
                 <div className="flex items-center justify-between">
@@ -360,7 +385,6 @@ export default function Page() {
               </div>
             </section>
           </div>
-
         </div>
       </main>
     </div>

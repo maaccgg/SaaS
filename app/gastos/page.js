@@ -1,12 +1,23 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabaseClient';
+import { z } from 'zod';
 import { 
   Wrench, PlusCircle, History, Trash2, Fuel, X, 
   Truck, TrendingDown, Calendar, Search, ChevronDown 
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
 import TarjetaDato from '@/components/tarjetaDato';
+
+// === ESCUDO DE VALIDACIÓN ZOD PARA GASTOS ===
+const gastoSchema = z.object({
+  costo: z.number().positive("🛑 El costo del gasto debe ser mayor a $0."),
+  descripcion: z.string().min(3, "🛑 La descripción es obligatoria y debe ser clara."),
+  tipo: z.enum(["Preventivo", "Correctivo", "Combustible", "Otros"], { 
+    errorMap: () => ({ message: "🛑 Tipo de gasto inválido." }) 
+  }),
+  fecha: z.string().min(10, "🛑 La fecha es obligatoria.")
+});
 
 export default function GastosOperativosPage() {
   const [sesion, setSesion] = useState(null);
@@ -62,7 +73,7 @@ export default function GastosOperativosPage() {
     await obtenerDatos(idMaestro);
   }
 
-async function obtenerDatos(idMaestro) {
+  async function obtenerDatos(idMaestro) {
     setLoading(true);
     
     // 1. Cargar catálogo de unidades (SOLO ACTIVAS)
@@ -94,16 +105,47 @@ async function obtenerDatos(idMaestro) {
   const registrarGasto = async (e) => {
     e.preventDefault();
     setLoading(true);
-    const { error } = await supabase.from('mantenimientos').insert([
-      { ...formData, costo: parseFloat(formData.costo), usuario_id: empresaId } 
-    ]);
 
-    if (!error) {
+    try {
+      // 1. Preparamos los datos crudos
+      const datosCrudos = {
+        costo: parseFloat(formData.costo),
+        descripcion: formData.descripcion.trim(),
+        tipo: formData.tipo,
+        fecha: formData.fecha
+      };
+
+      // 2. Pasamos por el detector de metales (SAFE PARSE)
+      const validacion = gastoSchema.safeParse(datosCrudos);
+
+      if (!validacion.success) {
+        setLoading(false);
+        const mensajeError = validacion.error.issues[0]?.message || "🛑 Revisa los datos ingresados.";
+        return alert(mensajeError);
+      }
+
+      // 3. Si Zod aprueba, insertamos con el ADN de la empresa
+      const { error } = await supabase.from('mantenimientos').insert([
+        { 
+          unidad_id: formData.unidad_id, 
+          descripcion: validacion.data.descripcion, 
+          costo: validacion.data.costo, 
+          tipo: validacion.data.tipo, 
+          fecha: validacion.data.fecha,
+          usuario_id: empresaId 
+        } 
+      ]);
+
+      if (error) throw error;
+
       setFormData({ unidad_id: '', descripcion: '', costo: '', tipo: 'Preventivo', fecha: new Date().toISOString().split('T')[0] });
       setMostrarFormulario(false);
       obtenerDatos(empresaId);
+    } catch (error) {
+      alert("Fallo al registrar gasto: " + error.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const eliminarGasto = async (id) => {
