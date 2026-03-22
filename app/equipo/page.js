@@ -75,29 +75,37 @@ export default function EquipoPage() {
     if (error) alert("Error: " + error.message);
     else cargarEquipo(empresaId);
   };
-
-  const guardarUsuario = async (e) => {
+const guardarUsuario = async (e) => {
     e.preventDefault();
     setProcesando(true);
     try {
+      // 1. OBTENEMOS EL GAFETE DEL ADMINISTRADOR (Para poder crear/editar)
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error("Sesión expirada. Vuelve a iniciar sesión.");
+
       if (editandoId) {
         const { error } = await supabase
           .from('perfiles')
           .update({
-            nombre_completo: formData.nombre_completo.toLowerCase(),
-            email: formData.email.toLowerCase(),
+            nombre_completo: formData.nombre_completo.trim(), // Quitamos toLowerCase(), solo quitamos espacios extra
+            email: formData.email.trim().toLowerCase(), // El correo sí debe ir en minúsculas siempre
             rol: formData.rol
           })
           .eq('id', editandoId);
         if (error) throw error;
       } else {
+        // 2. DISPARAMOS AL TÚNEL DE CREACIÓN CON EL GAFETE
         const response = await fetch('/api/crear-usuario', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}` // <--- INYECCIÓN DEL GAFETE
+          },
           body: JSON.stringify({ 
-            ...formData, 
-            nombre_completo: formData.nombre_completo.toLowerCase(),
-            email: formData.email.toLowerCase(),
+            nombre_completo: formData.nombre_completo.trim(), // Permitimos mayúsculas
+            email: formData.email.trim().toLowerCase(),
+            password: formData.password,
+            rol: formData.rol,
             empresa_id: empresaId 
           })
         });
@@ -210,7 +218,7 @@ export default function EquipoPage() {
                 <form onSubmit={guardarUsuario} className="space-y-4">
                   <div>
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Nombre Completo</label>
-                    <input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white focus:border-blue-500 outline-none lowercase" 
+                    <input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white focus:border-blue-500 outline-none" 
                       value={formData.nombre_completo} onChange={e => setFormData({...formData, nombre_completo: e.target.value})} placeholder="ej. juan pérez" />
                   </div>
 

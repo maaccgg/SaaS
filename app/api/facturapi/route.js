@@ -1,51 +1,80 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
 
 export async function POST(request) {
   try {
-    // 1. EL CADENERO VERIFICA EL GAFETE (Usando el nuevo estándar SSR)
-    const cookieStore = await cookies();
+    // ==========================================
+    // FASE 1: EL CADENERO EXIGE GAFETE (USUARIO)
+    // ==========================================
+    const authHeader = request.headers.get('Authorization');
     
-    const supabase = createServerClient(
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return NextResponse.json({ error: 'Acceso Denegado. Se requiere autenticación.' }, { status: 401 });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    const supabaseAuth = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       {
-        cookies: {
-          get(name) {
-            return cookieStore.get(name)?.value;
-          },
-        },
+        global: { headers: { Authorization: `Bearer ${token}` } }
       }
     );
 
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user }, error: authError } = await supabaseAuth.auth.getUser();
 
-    // Si no hay sesión válida, abortamos con un error 401 (No Autorizado)
-    if (!session) {
-      console.warn("Intento de acceso bloqueado en API de Facturapi.");
-      return NextResponse.json({ error: 'Acceso Denegado. Intento de intrusión registrado.' }, { status: 401 });
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Gafete inválido o expirado.' }, { status: 401 });
     }
 
-    // 2. Si pasó el escáner, extraemos la petición
+    // ==========================================
+    // FASE 2: BÚSQUEDA DE LLAVE MULTI-TENANT
+    // ==========================================
+    // A. Identificamos a la empresa del usuario
+    const { data: perfilPeticionario, error: perfilError } = await supabaseAuth
+      .from('perfiles')
+      .select('empresa_id')
+      .eq('id', user.id)
+      .single();
+
+    if (perfilError) {
+      return NextResponse.json({ error: 'No se pudo verificar la identidad corporativa.' }, { status: 403 });
+    }
+
+    const idMaestro = perfilPeticionario?.empresa_id || user.id;
+
+    // B. Extraemos la llave de Facturapi (Usamos la Llave Maestra por seguridad interna)
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } }
+    );
+
+    const { data: perfilMaestro, error: maestroError } = await supabaseAdmin
+      .from('perfiles')
+      .select('facturapi_key')
+      .eq('id', idMaestro)
+      .single();
+
+    const apiKeyCliente = perfilMaestro?.facturapi_key;
+
+    if (!apiKeyCliente) {
+      return NextResponse.json({ error: 'Operación bloqueada: Tu empresa no tiene una llave de Facturapi configurada. Contacta a soporte.' }, { status: 403 });
+    }
+
+    // ==========================================
+    // FASE 3: TIMBRADO EXCLUSIVO DEL CLIENTE
+    // ==========================================
     const body = await request.json();
     const { endpoint, method, payload } = body;
     
-    // Extraemos la llave de la bóveda del servidor
-    const apiKey = process.env.FACTURAPI_KEY;
-
-    if (!apiKey) {
-      console.error("CRÍTICO: No se encontró FACTURAPI_KEY en el servidor.");
-      return NextResponse.json({ error: 'Error de configuración interna.' }, { status: 500 });
-    }
-
-    // 3. Petición segura a Facturapi
     const url = `https://www.facturapi.io/v2/${endpoint}`;
     const options = {
       method: method || 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer ${apiKeyCliente}` // <--- TIMBRAMOS CON LA LLAVE DE SU BD
       }
     };
 
@@ -55,7 +84,6 @@ export async function POST(request) {
 
     const response = await fetch(url, options);
 
-    // Manejo de archivos (XML)
     const contentType = response.headers.get('content-type');
     if (contentType && contentType.includes('application/xml')) {
         const xmlText = await response.text();
@@ -63,14 +91,13 @@ export async function POST(request) {
         return new NextResponse(xmlText, { headers: { 'Content-Type': 'application/xml' } });
     }
 
-    // Manejo de JSON estándar
     const data = await response.json();
     if (!response.ok) return NextResponse.json(data, { status: response.status });
 
     return NextResponse.json(data);
 
   } catch (error) {
-    console.error("Error en túnel seguro:", error);
+    console.error("Error en túnel seguro multi-tenant:", error);
     return NextResponse.json({ error: 'Falla de comunicación interna.' }, { status: 500 });
   }
 }

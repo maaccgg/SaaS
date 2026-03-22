@@ -352,9 +352,16 @@ const timbrarCartaPorte = async (viaje) => {
       };
 
       // ATAQUE MITIGADO: Llamada al túnel seguro
+const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) throw new Error("Sesión expirada o inválida. Vuelve a iniciar sesión.");
+
       const response = await fetch('/api/facturapi', { 
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}` // <--- AQUÍ LE ENSEÑAMOS EL GAFETE AL TÚNEL
+        }, 
         body: JSON.stringify({
           endpoint: 'invoices',
           method: 'POST',

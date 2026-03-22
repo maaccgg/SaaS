@@ -147,18 +147,28 @@ const descargarXML = async (facturapi_id, cliente_nombre) => {
     if (!facturapi_id) return alert("Esta factura aún no está timbrada en el SAT.");
     
     try {
-      // ATAQUE MITIGADO: Llamada al túnel seguro
-      const response = await fetch('/api/facturapi', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      // 1. OBTENEMOS EL GAFETE DEL USUARIO
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) throw new Error("Sesión expirada o inválida. Vuelve a iniciar sesión.");
+
+      // 2. DISPARAMOS AL TÚNEL PIDIENDO EL XML (MÉTODO GET, SIN PAYLOAD)
+      const response = await fetch('/api/facturapi', { 
+        method: 'POST', // Sigue siendo POST hacia nuestro propio túnel
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}` 
+        }, 
         body: JSON.stringify({
-          endpoint: `invoices/${facturapi_id}/xml`,
-          method: 'GET'
-        })
+          endpoint: `invoices/${facturapi_id}/xml`, // <--- RUTA CORRECTA PARA DESCARGAR
+          method: 'GET' // <--- MÉTODO CORRECTO PARA CONSULTA
+          // Eliminamos el payload por completo
+        }) 
       });
 
       if (!response.ok) throw new Error("No se pudo obtener el XML del SAT");
 
+      // 3. RECIBIMOS EL ARCHIVO (BLOB) DIRECTAMENTE, SIN PARSEAR JSON
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -168,6 +178,7 @@ const descargarXML = async (facturapi_id, cliente_nombre) => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
+
     } catch (err) {
       alert("Error al descargar XML: " + err.message);
     }
@@ -198,15 +209,24 @@ const timbrarFactura = async (factura) => {
 
     setLoading(true);
     try {
-      // ATAQUE MITIGADO: Llamada al túnel seguro
-      const response = await fetch('/api/facturapi', {
+
+      // 1. OBTENEMOS EL GAFETE DEL USUARIO
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) throw new Error("Sesión expirada o inválida. Vuelve a iniciar sesión.");
+
+      // 2. DISPARAMOS AL TÚNEL CON LA CABECERA DE AUTORIZACIÓN
+      const response = await fetch('/api/facturapi', { 
         method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}` // <--- EL GAFETE
+        }, 
         body: JSON.stringify({
           endpoint: 'invoices',
           method: 'POST',
-          payload: invoiceData
-        })
+          payload: invoiceData // Asegúrate de que tu variable se llame así o cámbiala por la tuya
+        }) 
       });
       const res = await response.json();
 
