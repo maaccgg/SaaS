@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient'; 
 import { 
@@ -34,11 +35,9 @@ const menuItems = [
 export default function Sidebar() {
   const pathname = usePathname();
   
-  // NUEVOS ESTADOS PARA EL MENÚ DE CONFIGURACIÓN
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [rolUsuario, setRolUsuario] = useState('miembro');
 
-  // EFECTO PARA OBTENER EL ROL DEL USUARIO
   useEffect(() => {
     const obtenerRol = async () => {
       const { data: { session } } = await supabase.auth.getSession();
@@ -62,12 +61,26 @@ export default function Sidebar() {
 
   return (
     <nav className="w-64 h-screen p-6 border-r border-slate-800 bg-slate-950 flex flex-col gap-2 sticky top-0 overflow-y-auto">
-      <div className="mb-8 px-3">
-        <h2 className="text-[10px] font-black text-blue-500 uppercase tracking-[0.3em] italic leading-tight">
-          Gestión de Flotilla 
-        </h2>
-        <p className="text-[9px] text-slate-600 font-bold uppercase mt-1"> 2026</p>
+      
+
+{/* SECCIÓN DEL LOGOTIPO (CÓDIGO PURO) */}
+      <div className="mb-8 px-2 flex flex-col items-start select-none">
+        <div className="flex items-center gap-2 mb-1">
+          {/* El ícono del camión en verde */}
+          <Truck size={28} className="text-emerald-500" strokeWidth={2} />
+          
+          {/* El texto de FleetForce */}
+          <h1 className="text-2xl font-black text-white tracking-tight leading-none">
+            Fleet<span className="font-bold text-slate-300">Force</span>
+          </h1>
+        </div>
+        
+        {/* El subtítulo */}
+        <p className="text-[9px] text-slate-600 font-bold uppercase ml-1 tracking-widest mt-1">
+          Gestión 2026
+        </p>
       </div>
+
 
       <div className="flex flex-col gap-1 flex-1">
         {menuItems.map((item) => {
@@ -112,7 +125,6 @@ export default function Sidebar() {
             {isConfigOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
 
-          {/* SUBMENÚ DESPLEGABLE */}
           {isConfigOpen && (
             <div className="flex flex-col gap-1 pl-2 border-l-2 border-slate-800 ml-2 animate-in fade-in slide-in-from-top-2">
               
