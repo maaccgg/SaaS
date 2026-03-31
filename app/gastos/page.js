@@ -11,12 +11,13 @@ import TarjetaDato from '@/components/tarjetaDato';
 
 // === ESCUDO DE VALIDACIÓN ZOD PARA GASTOS ===
 const gastoSchema = z.object({
-  costo: z.number().positive("🛑 El costo del gasto debe ser mayor a $0."),
+  costo: z.number().nonnegative("🛑 El costo no puede ser negativo."),
   descripcion: z.string().min(3, "🛑 La descripción es obligatoria y debe ser clara."),
   tipo: z.enum(["Preventivo", "Correctivo", "Combustible", "Otros"], { 
     errorMap: () => ({ message: "🛑 Tipo de gasto inválido." }) 
   }),
-  fecha: z.string().min(10, "🛑 La fecha es obligatoria.")
+  fecha: z.string().min(10, "🛑 La fecha es obligatoria."),
+  viaje_id: z.string().optional()
 });
 
 export default function GastosOperativosPage() {
@@ -26,6 +27,7 @@ export default function GastosOperativosPage() {
   const [mostrarFiltro, setMostrarFiltro] = useState(false);
   
   const [unidades, setUnidades] = useState([]);
+  const [viajesActivos, setViajesActivos] = useState([]);
   const [historial, setHistorial] = useState([]);
   const [metricas, setMetricas] = useState({ totalPeriodo: 0, conteo: 0 });
   
@@ -40,7 +42,7 @@ export default function GastosOperativosPage() {
   const [fechaFin, setFechaFin] = useState(ultimoDiaMes);
 
   const [formData, setFormData] = useState({ 
-    unidad_id: '', descripcion: '', costo: '', tipo: 'Preventivo',
+    unidad_id: '', viaje_id: '', descripcion: '', costo: '', tipo: 'Preventivo',
     fecha: new Date().toISOString().split('T')[0]
   });
 
@@ -84,10 +86,21 @@ export default function GastosOperativosPage() {
       .eq('activo', true);
     setUnidades(unidadesBD || []);
 
-    // 2. Consulta con Rango de Fechas (CON ID DE LA EMPRESA)
+    // 2. Cargar los últimos viajes para el selector manual
+const { data: viajesBD, error: errorViajes } = await supabase
+      .from('viajes')
+      .select('id, folio_interno, fecha_salida') // <--- Quitamos 'ruta' y pusimos 'fecha_salida'
+      .eq('usuario_id', idMaestro)
+      .order('created_at', { ascending: false })
+      .limit(50);
+      
+    if (errorViajes) console.error("Error al cargar viajes:", errorViajes.message);
+    setViajesActivos(viajesBD || []);
+
+    // 3. Consulta con Rango de Fechas e Inner Join a Viajes
     const { data: gastosBD, error } = await supabase
       .from('mantenimientos')
-      .select(`*, unidades(numero_economico)`)
+      .select(`*, unidades(numero_economico), viajes(folio_interno)`)
       .eq('usuario_id', idMaestro)
       .gte('fecha', fechaInicio)
       .lte('fecha', fechaFin)
@@ -109,10 +122,11 @@ export default function GastosOperativosPage() {
     try {
       // 1. Preparamos los datos crudos
       const datosCrudos = {
-        costo: parseFloat(formData.costo),
+        costo: parseFloat(formData.costo || 0),
         descripcion: formData.descripcion.trim(),
         tipo: formData.tipo,
-        fecha: formData.fecha
+        fecha: formData.fecha,
+        viaje_id: formData.viaje_id === '' ? undefined : formData.viaje_id
       };
 
       // 2. Pasamos por el detector de metales (SAFE PARSE)
@@ -128,6 +142,7 @@ export default function GastosOperativosPage() {
       const { error } = await supabase.from('mantenimientos').insert([
         { 
           unidad_id: formData.unidad_id, 
+          viaje_id: validacion.data.viaje_id || null,
           descripcion: validacion.data.descripcion, 
           costo: validacion.data.costo, 
           tipo: validacion.data.tipo, 
@@ -138,7 +153,7 @@ export default function GastosOperativosPage() {
 
       if (error) throw error;
 
-      setFormData({ unidad_id: '', descripcion: '', costo: '', tipo: 'Preventivo', fecha: new Date().toISOString().split('T')[0] });
+      setFormData({ unidad_id: '', viaje_id: '', descripcion: '', costo: '', tipo: 'Preventivo', fecha: new Date().toISOString().split('T')[0] });
       setMostrarFormulario(false);
       obtenerDatos(empresaId);
     } catch (error) {
@@ -221,70 +236,104 @@ export default function GastosOperativosPage() {
             </div>
           )}
 
-          {/* TABLA DE HISTORIAL ESTANDARIZADA */}
+{/* TABLA DE HISTORIAL ESTANDARIZADA (DISEÑO TIPO FACTURAS) */}
           <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl mb-12">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-[13px]">
                 <thead>
                   <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-[12px] font-semibold uppercase tracking-wider">
-                    <th className="p-4 pl-8 font-normal w-16">Tipo</th>
+                    <th className="p-4 pl-8 font-normal w-12">Tipo</th>
+                    <th className="p-4 font-normal">Folio y Origen</th>
                     <th className="p-4 font-normal">Detalle del Gasto</th>
                     <th className="p-4 font-normal">Unidad</th>
                     <th className="p-4 font-normal">Fecha</th>
-                    <th className="p-4 font-normal">Monto</th>
+                    <th className="p-4 font-normal">Monto Total</th>
                     <th className="p-4 pr-8 text-right font-normal">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {historial.map((item) => (
-                    <tr key={item.id} className="hover:bg-slate-800/30 transition-colors group">
-                      
-                      <td className="p-4 pl-8 align-middle">
-                        <div className={`p-2.5 w-fit rounded-xl border ${item.tipo === 'Correctivo' ? 'bg-red-500/10 border-red-500/30 text-red-400' : (item.tipo === 'Combustible' ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400')}`}>
-                          {item.tipo === 'Combustible' ? <Fuel size={16}/> : <Wrench size={16} />}
-                        </div>
-                      </td>
+                  {historial.map((item) => {
+                    const vieneDeViaje = item.viaje_id !== null;
 
-                      <td className="p-4 align-middle">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-white font-bold uppercase truncate max-w-[250px]">{item.descripcion}</span>
-                          <span className="text-slate-500 text-[10px] uppercase tracking-widest">{item.tipo}</span>
-                        </div>
-                      </td>
-
-                      <td className="p-4 align-middle">
-                        <span className="text-[12px] font-mono font-medium text-slate-300 bg-slate-950 px-3 py-1 rounded-lg border border-slate-800 flex items-center gap-2 w-fit">
-                          <Truck size={12} className="text-slate-500"/>
-                          {item.unidades?.numero_economico || 'S/U'}
-                        </span>
-                      </td>
-
-                      <td className="p-4 align-middle">
-                        <span className="text-slate-400 text-[12px]">{item.fecha}</span>
-                      </td>
-
-                      <td className="p-4 align-middle">
-                        <span className="text-[14px] font-mono font-medium text-white">
-                          ${Number(item.costo).toLocaleString('es-MX', {minimumFractionDigits: 2})}
-                        </span>
-                      </td>
-
-                      <td className="p-4 pr-8 align-middle">
-                        <div className="flex items-center justify-end gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => eliminarGasto(item.id)} title="Eliminar Gasto" className="p-2 text-slate-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors">
-                            <Trash2 size={16} />
+                    return (
+                      <tr key={item.id} className="hover:bg-slate-800/30 transition-colors group">
+                        
+                        {/* COLUMNA 1: TIPO (ÍCONO) */}
+                        <td className="p-4 pl-8 align-middle">
+                          <button title={item.tipo} className={`p-2 rounded-lg transition-all cursor-default ${item.tipo === 'Correctivo' ? 'bg-red-500/10 text-red-500' : (item.tipo === 'Combustible' ? 'bg-orange-500/10 text-orange-400' : 'bg-blue-500/10 text-blue-400')}`}>
+                            {item.tipo === 'Combustible' ? <Fuel size={18} /> : <Wrench size={18} />}
                           </button>
-                        </div>
-                      </td>
-                      
-                    </tr>
-                  ))}
+                        </td>
+
+                        {/* COLUMNA 2: FOLIO Y ORIGEN */}
+                        <td className="p-4 align-middle">
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="text-[14px] text-white font-mono font-medium">
+                              {item.folio_interno ? `G-${String(item.folio_interno).padStart(4, '0')}` : 'G-S/N'}
+                            </span>
+                            
+                            {vieneDeViaje ? (
+                              <span className="inline-flex px-2 py-0.5 rounded bg-blue-900/30 border border-blue-500/30 text-blue-400 uppercase tracking-widest text-[9px] items-center gap-1 mt-0.5">
+                                <Truck size={8}/> VIAJE: {item.viajes?.folio_interno ? `V-${String(item.viajes?.folio_interno).padStart(4, '0')}` : 'V-S/N'}
+                              </span>
+                            ) : (
+                              <span className="inline-flex px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 uppercase tracking-widest text-[9px] items-center gap-1 mt-0.5">
+                                Gasto General
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* COLUMNA 3: DETALLE DEL GASTO */}
+                        <td className="p-4 align-middle">
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-white truncate max-w-[200px]" title={item.descripcion}>{item.descripcion}</span>
+                            <span className="text-slate-500 text-[11px] font-mono uppercase tracking-widest">
+                              {item.tipo}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* COLUMNA 4: UNIDAD */}
+                        <td className="p-4 align-middle max-w-[200px]">
+                          {item.unidades?.numero_economico ? (
+                            <span className="text-slate-300 text-[12px] truncate block font-mono">ECO: {item.unidades.numero_economico}</span>
+                          ) : (
+                            <span className="text-slate-600 text-[12px] truncate block font-mono">---</span>
+                          )}
+                        </td>
+
+                        {/* COLUMNA 5: FECHA */}
+                        <td className="p-4 align-middle">
+                           <span className="text-[12px] text-slate-300">
+                             {item.fecha?.slice(0, 10) || 'S/F'}
+                           </span>
+                        </td>
+
+                        {/* COLUMNA 6: MONTO TOTAL */}
+                        <td className="p-4 align-middle">
+                          <span className="text-[14px] font-mono font-medium text-white">
+                            ${Number(item.costo).toLocaleString('es-MX', {minimumFractionDigits: 2})}
+                          </span>
+                        </td>
+
+                        {/* COLUMNA 7: ACCIONES */}
+                        <td className="p-4 pr-8 align-middle">
+                          <div className="flex items-center justify-end gap-1.5 opacity-20 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => eliminarGasto(item.id)} title={vieneDeViaje ? "Borrar desde Viajes" : "Eliminar"} className={`p-2 transition-colors rounded-lg ${vieneDeViaje ? 'text-slate-700 cursor-not-allowed' : 'text-slate-600 hover:text-red-500 hover:bg-red-500/10'}`}>
+                              <Trash2 size={16} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   
                   {historial.length === 0 && (
                     <tr>
-                      <td colSpan="6" className="py-16 text-center">
+                      <td colSpan="7" className="py-16 text-center">
                         <Wrench size={32} className="mx-auto text-slate-700 mb-3" />
-                        <p className="text-slate-500 uppercase tracking-widest text-sm">Sin registros en este rango de fechas.</p>
+                        <p className="text-slate-500 uppercase tracking-widest text-sm">Sin registros en este periodo</p>
                       </td>
                     </tr>
                   )}
@@ -303,9 +352,16 @@ export default function GastosOperativosPage() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <select required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white"
                       value={formData.unidad_id} onChange={e => setFormData({...formData, unidad_id: e.target.value})}>
-                      <option value="">Unidad...</option>
+                      <option value="">Unidad (Opcional si es Gasto General)...</option>
                       {unidades.map(u => <option key={u.id} value={u.id}>{u.numero_economico}</option>)}
                     </select>
+                    
+                    <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white focus:border-blue-500 outline-none"
+                      value={formData.viaje_id} onChange={e => setFormData({...formData, viaje_id: e.target.value})}>
+                      <option value="">-- Sin Viaje Asignado (Gasto General) --</option>
+                      {viajesActivos.map(v => <option key={v.id} value={v.id}>Viaje V-{String(v.folio_interno).padStart(4, '0')} {v.ruta ? `(${v.ruta})` : ''}</option>)}
+                    </select>
+
                     <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white"
                       value={formData.tipo} onChange={e => setFormData({...formData, tipo: e.target.value})}>
                       <option value="Preventivo">Preventivo</option>
@@ -313,14 +369,17 @@ export default function GastosOperativosPage() {
                       <option value="Combustible">Combustible</option>
                       <option value="Otros">Otros</option>
                     </select>
-                    <input required className="md:col-span-2 w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white" 
+
+                    <input required className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white" 
                       value={formData.descripcion} onChange={e => setFormData({...formData, descripcion: e.target.value})} placeholder="Descripción" />
+                    
                     <input required type="number" step="0.01" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white font-mono" 
                       value={formData.costo} onChange={e => setFormData({...formData, costo: e.target.value})} placeholder="0.00" />
+                    
                     <input type="date" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white" 
                       value={formData.fecha} onChange={e => setFormData({...formData, fecha: e.target.value})} />
                   </div>
-                  <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-xl">
+                  <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-xl hover:bg-blue-500 transition-all flex justify-center items-center gap-2">
                     {loading ? "Sincronizando..." : "Confirmar Egreso"}
                   </button>
                 </form>

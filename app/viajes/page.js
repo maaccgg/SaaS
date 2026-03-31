@@ -40,7 +40,8 @@ export default function ViajesPage() {
   const formInicial = {
     unidad_id: '', remolque_id: '', operador_id: '', origen_id: '', destino_id: '', 
     cliente_id: '', monto_flete: '', distancia_km: '', referencia: '', fecha_salida: new Date().toISOString().split('T')[0],
-    mercancias_detalle: [{ mercancia_id: '', cantidad: 1, peso_kg: '', valor: '', moneda: 'MXN' }] 
+    mercancias_detalle: [{ mercancia_id: '', cantidad: 1, peso_kg: '', valor: '', moneda: 'MXN' }],
+    gasto_monto: '', gasto_descripcion: 'Viáticos de Ruta'
   };
 
   const [formData, setFormData] = useState(formInicial);
@@ -131,10 +132,12 @@ export default function ViajesPage() {
     setMostrarModal(true);
   };
 
-  const eliminarViaje = async (id) => {
+const eliminarViaje = async (id) => {
     if (!confirm("¿Deseas eliminar este viaje permanentemente?")) return;
     setLoading(true);
     try {
+      // ORDEN ESTRATÉGICO: Borramos primero los hijos (gastos y facturas) y al final el padre (viaje)
+      await supabase.from('mantenimientos').delete().eq('viaje_id', id); 
       await supabase.from('facturas').delete().eq('viaje_id', id);
       await supabase.from('viajes').delete().eq('id', id);
       obtenerViajes(empresaId);
@@ -463,24 +466,38 @@ const { data: { session } } = await supabase.auth.getSession();
             }]);
           }
         }
-      } else {
+     } else {
         // === MODO CREACIÓN (NUEVO VIAJE) ===
         const nuevoIdCCP = generarIdCCP();
 
-        // Se inserta viaje omitiendo folio_interno. La BD genera el folio y lo devuelve en .single()
+        // 1. Se inserta viaje omitiendo folio_interno. La BD genera el folio y lo devuelve
         const { data: nuevoViaje, error: errorViaje } = await supabase.from('viajes')
           .insert([{ ...payloadComun, id_ccp: nuevoIdCCP, estatus: 'Borrador' }])
           .select().single();
           
         if (errorViaje) throw errorViaje;
 
+        // 2. CREACIÓN AUTOMÁTICA DE FACTURA (Si aplica)
         if (formData.monto_flete > 0 && formData.cliente_id) {
           const fechaVenc = new Date(formData.fecha_salida); fechaVenc.setDate(fechaVenc.getDate() + (clienteObj?.dias_credito || 0));
           
-          // Se inserta factura omitiendo folio_interno, enlazada por folio_viaje
           await supabase.from('facturas').insert([{ 
             usuario_id: empresaId, viaje_id: nuevoViaje.id, folio_viaje: nuevoViaje.folio_interno,
             cliente: clienteObj.nombre, monto_total: parseFloat(formData.monto_flete), fecha_viaje: formData.fecha_salida, fecha_vencimiento: fechaVenc.toISOString().split('T')[0], estatus_pago: 'Pendiente', ruta: `Flete CCP${formData.referencia ? ' - Ref: '+formData.referencia : ''}` 
+          }]);
+        }
+
+        // 3. CREACIÓN AUTOMÁTICA DEL GASTO BASE DEL VIAJE (NUEVO)
+        // Crea una "carpeta" de gasto inicial en 0 para que el despachador añada después los viáticos
+if (formData.gasto_monto && parseFloat(formData.gasto_monto) > 0) {
+          await supabase.from('mantenimientos').insert([{
+            usuario_id: empresaId,
+            unidad_id: formData.unidad_id,
+            viaje_id: nuevoViaje.id, 
+            descripcion: formData.gasto_descripcion || `Gastos Operativos - Viaje V-${String(nuevoViaje.folio_interno).padStart(4, '0')}`,
+            costo: parseFloat(formData.gasto_monto), 
+            tipo: 'Otros',
+            fecha: formData.fecha_salida
           }]);
         }
       }
@@ -797,7 +814,16 @@ const { data: { session } } = await supabase.auth.getSession();
                     <input type="text" placeholder="Orden de Compra / Referencia (Opcional)" className="col-span-1 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.referencia} onChange={e => setFormData({...formData, referencia: e.target.value})} />
                     <input type="number" placeholder="Monto Flete ($)" className="col-span-1 bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" value={formData.monto_flete} onChange={e => setFormData({...formData, monto_flete: e.target.value})} />
                   </div>
-
+<div className="p-4 border border-orange-500/20 bg-orange-900/10 rounded-2xl">
+                    <p className="text-[10px] text-orange-400 uppercase tracking-widest mb-4 font-bold flex items-center gap-2"><DollarSign size={12}/> Gasto Operativo / Viáticos (Opcional)</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <input type="number" step="0.01" placeholder="Monto del Gasto Inicial ($)" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" 
+                        value={formData.gasto_monto} onChange={e => setFormData({...formData, gasto_monto: e.target.value})} />
+                      <input type="text" placeholder="Concepto (Ej. Viáticos)" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm text-white" 
+                        value={formData.gasto_descripcion} onChange={e => setFormData({...formData, gasto_descripcion: e.target.value})} />
+                    </div>
+                  </div>
+                  
                   <button type="submit" disabled={loading} className={`w-full py-5 rounded-2xl uppercase text-sm tracking-widest transition-all ${editandoId ? 'bg-orange-500 hover:bg-orange-400' : 'bg-blue-600 hover:bg-blue-500'} text-white`}>
                     {loading ? "Procesando..." : (editandoId ? "Guardar Cambios" : "Confirmar Viaje")}
                   </button>
