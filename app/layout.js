@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Institución SaaS 2026",
-  description: "Sistema de Consolidación de Activos y Logística",
+  title: "FleetForce",
+  description: "Gestión de flotas eficiente y sin complicaciones",
 };
 
 export default function RootLayout({ children }) {

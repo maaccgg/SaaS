@@ -5,7 +5,8 @@ import TarjetaDato from '@/components/tarjetaDato';
 import Sidebar from '@/components/sidebar';
 import { 
   Bell, Calendar, DollarSign, TrendingUp, AlertTriangle, 
-  ChevronRight, Search, ChevronDown, Truck, User, Loader2 
+  ChevronRight, Search, ChevronDown, Truck, User, Loader2,
+  Mail, Lock, ArrowRight
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -32,6 +33,7 @@ export default function Page() {
   const [email, setEmail] = useState(""); 
   const [password, setPassword] = useState(""); 
   const [loading, setLoading] = useState(true);
+  const [errorLogin, setErrorLogin] = useState(null); // <-- Nuevo: Para mensajes en UI
   const router = useRouter();
 
   const [empresaId, setEmpresaId] = useState(null);
@@ -43,7 +45,7 @@ export default function Page() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSesion(session);
-      setLoading(false); // <-- ESTO LIBERA LA PANTALLA DE CARGA
+      setLoading(false); 
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -64,19 +66,20 @@ export default function Page() {
   }, [sesion, fechaInicio, fechaFin, filtroActivo]);
 
   // =====================================================================
-  // 3. MANEJADOR DE LOGIN CON BLINDAJE INSTITUCIONAL
+  // 3. MANEJADOR DE LOGIN (DISEÑO ACTUALIZADO)
   // =====================================================================
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setErrorLogin(null);
 
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim().toLowerCase(),
       password,
     });
 
     if (authError) {
-      alert("Error de acceso: " + authError.message);
+      setErrorLogin("Credenciales incorrectas o acceso denegado.");
       setLoading(false);
       return;
     }
@@ -89,10 +92,25 @@ export default function Page() {
 
     if (perfil && perfil.activo === false) {
       await supabase.auth.signOut();
-      alert("🛑 ACCESO DENEGADO: Cuenta inactiva. Por favor ponte en contacto con el administrador");
+      setErrorLogin("🛑 ACCESO DENEGADO: Cuenta inactiva.");
       setLoading(false);
       return;
     }
+  };
+
+  // Función para recuperación de contraseña (Mismo estilo que bienvenida)
+  const recuperarPassword = async () => {
+    if (!email) {
+      setErrorLogin("Ingresa tu correo para enviarte el enlace.");
+      return;
+    }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: `${window.location.origin}/bienvenida`,
+    });
+    if (error) setErrorLogin(error.message);
+    else alert("Se ha enviado un enlace de recuperación a tu correo.");
+    setLoading(false);
   };
 
   async function obtenerDashboard(userId) {
@@ -107,7 +125,6 @@ export default function Page() {
       .eq('id', userId)
       .single();
 
-    // Expulsión si la cuenta se desactiva mientras está logueado
     if (perfilData && perfilData.activo === false) {
       await supabase.auth.signOut();
       window.location.href = '/';
@@ -120,7 +137,7 @@ export default function Page() {
 
     let queryFacturas = supabase.from('facturas').select('monto_total').eq('usuario_id', idMaestro).eq('estatus_pago', 'Pagado');
     let queryGastos = supabase.from('mantenimientos').select('costo').eq('usuario_id', idMaestro);
-    let queryViajes = supabase.from('viajes').select('estatus').eq('usuario_id', idMaestro);
+    let queryViajes = supabase.from('viajes').select('estatus, folio_interno').eq('usuario_id', idMaestro);
 
     if (filtroActivo && fechaInicio && fechaFin) {
       queryFacturas = queryFacturas.gte('fecha_viaje', fechaInicio).lte('fecha_viaje', fechaFin);
@@ -149,23 +166,18 @@ export default function Page() {
     });
 
     const nuevasAlertas = [];
-const evaluarAlerta = (fechaString) => {
-    // Usamos T12:00:00 para evitar desfases de zona horaria
-    const fVencimiento = new Date(fechaString + 'T12:00:00'); 
-    const dias = Math.ceil((fVencimiento - ahora) / (1000 * 60 * 60 * 24));
-    let entraEnFiltro = false;
+    const evaluarAlerta = (fechaString) => {
+      const fVencimiento = new Date(fechaString + 'T12:00:00'); 
+      const dias = Math.ceil((fVencimiento - ahora) / (1000 * 60 * 60 * 24));
+      let entraEnFiltro = false;
 
-    if (filtroActivo && fIni && fFinObj) {
-      // REGLA OPERATIVA: 
-      // (dias <= 30) atrapa lo vencido (negativos) y lo que vence pronto (0 a 30).
-      // Esto fuerza a que la alerta aparezca sin importar si el filtro es de este mes.
-      entraEnFiltro = (dias <= 30) || (fVencimiento >= fIni && fVencimiento <= fFinObj);
-    } else {
-      entraEnFiltro = dias <= 30; 
-    }
-    
-    return { entraEnFiltro, dias };
-  }; 
+      if (filtroActivo && fIni && fFinObj) {
+        entraEnFiltro = (dias <= 30) || (fVencimiento >= fIni && fVencimiento <= fFinObj);
+      } else {
+        entraEnFiltro = dias <= 30; 
+      }
+      return { entraEnFiltro, dias };
+    }; 
 
     unidades?.forEach(u => {
       const docs = [{ t: 'Seguro', f: u.vencimiento_seguro }, { t: 'Permiso SCT', f: u.vencimiento_sct }];
@@ -230,21 +242,79 @@ const evaluarAlerta = (fechaString) => {
     return cumpleBusqueda && cumpleFiltro;
   });
 
-  if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center text-blue-500 font-black uppercase tracking-widest"><Loader2 className="animate-spin mr-2" /> Cargando...</div>;
-
-  if (!sesion) return (
-    <div className="flex items-center justify-center min-h-screen bg-slate-950 text-white p-6">
-      <form onSubmit={handleLogin} className="bg-slate-900 p-10 rounded-[2.5rem] border border-slate-800 w-full max-w-md shadow-2xl">
-        <h2 className="text-3xl font-black mb-8 text-blue-500 italic uppercase text-center tracking-tighter">Inicia <span className="text-white">Sesión</span></h2>
-        <div className="space-y-4">
-          <input type="email" placeholder="Usuario" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-white" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" placeholder="Contraseña" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl outline-none focus:border-blue-500 text-white" value={password} onChange={(e) => setPassword(e.target.value)} />
-          <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-2xl font-black uppercase tracking-widest transition-all">Entrar</button>
-        </div>
-      </form>
+  // Pantalla de Carga Estilizada
+  if (loading && !sesion) return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-blue-500 font-black uppercase tracking-widest">
+      <Loader2 className="animate-spin mb-4" size={40} /> 
+      Cargando...
     </div>
   );
 
+  // VISTA DE LOGIN CON DISEÑO FLEETFORCE
+  if (!sesion) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6 relative overflow-hidden">
+      {/* Orbes Decorativos */}
+      <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600/10 rounded-full blur-3xl"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-emerald-600/10 rounded-full blur-3xl"></div>
+
+      <div className="max-w-md w-full relative z-10 bg-slate-900 border border-slate-800 p-10 rounded-[2.5rem] shadow-2xl">
+        <div className="text-center mb-10">
+          <div className="flex justify-center items-center gap-2 mb-4">
+            <Truck size={36} className="text-emerald-500" strokeWidth={2} />
+          </div>
+          <h1 className="text-3xl font-black text-white tracking-tight leading-none uppercase italic mb-2">
+            Fleet<span className="text-slate-300">Force</span>
+          </h1>
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Acceso Operativo</p>
+        </div>
+
+        <form className="space-y-6" onSubmit={handleLogin}>
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Correo Electrónico</label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-4 text-slate-500" size={14} />
+                <input type="email" required placeholder=""
+                  className="w-full bg-slate-950 border border-slate-800 pl-12 p-3.5 rounded-2xl text-sm text-white focus:border-blue-500 outline-none transition-all lowercase"
+                  value={email} onChange={(e) => setEmail(e.target.value)} />
+              </div>
+            </div>
+            
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Contraseña</label>
+              <div className="relative">
+                <Lock className="absolute left-4 top-4 text-slate-500" size={16} />
+                <input type="password" required placeholder="••••••••"
+                  className="w-full bg-slate-950 border border-slate-800 pl-12 p-3.5 rounded-2xl text-sm text-white focus:border-blue-500 outline-none transition-all"
+                  value={password} onChange={(e) => setPassword(e.target.value)} />
+              </div>
+            </div>
+          </div>
+
+          {errorLogin && (
+            <div className="text-red-400 text-[11px] uppercase tracking-widest font-bold bg-red-500/10 p-4 rounded-xl border border-red-500/20 text-center animate-in fade-in">
+              {errorLogin}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end">
+            <button type="button" onClick={recuperarPassword} className="text-[10px] font-bold text-slate-500 hover:text-blue-400 uppercase tracking-widest transition-colors">
+              ¿Olvidaste tu contraseña?
+            </button>
+          </div>
+
+          <button type="submit" disabled={loading}
+            className={`w-full flex justify-center items-center gap-2 py-4 border border-transparent text-[11px] font-black uppercase tracking-widest rounded-xl text-white bg-blue-600 hover:bg-blue-500 focus:outline-none transition-all shadow-xl shadow-blue-900/20 ${loading ? 'opacity-70' : ''}`}
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <ArrowRight size={16} />}
+            {loading ? 'Verificando...' : 'Ingresar al Sistema'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+
+  // VISTA DEL DASHBOARD (SIN CAMBIOS EN TU LÓGICA)
   return (
     <div className="flex bg-slate-950 min-h-screen text-white">
       <Sidebar/>

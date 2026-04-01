@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import Sidebar from '@/components/sidebar';
 import { 
-  Users, ShieldCheck, UserPlus, X, Mail, Lock, User as UserIcon, Loader2, Edit2, Power, PowerOff, MoreVertical, Trash2, Send
+  Users, ShieldCheck, UserPlus, X, Mail, Lock, User as UserIcon, Loader2, Edit2, Power, PowerOff, MoreVertical, Trash2, Send, Receipt, Crown
 } from 'lucide-react';
 
 export default function EquipoPage() {
@@ -18,8 +18,18 @@ export default function EquipoPage() {
   const [equipo, setEquipo] = useState([]);
   const [menuAbiertoId, setMenuAbiertoId] = useState(null);
 
-  const formInicial = { nombre_completo: '', email: '', rol: 'miembro' };
+  // === NUEVOS ESTADOS PARA PLANES ===
+  const [planActual, setPlanActual] = useState('inicio');
+  const [limiteUsuarios, setLimiteUsuarios] = useState(1);
+
+  const formInicial = { nombre_completo: '', email: '', rol: 'operaciones' };
   const [formData, setFormData] = useState(formInicial);
+
+  const LIMITES_POR_PLAN = {
+    'inicio': 1,
+    'flotilla': 2,
+    'completo': 3
+  };
 
   useEffect(() => {
     const inicializar = async () => {
@@ -29,7 +39,7 @@ export default function EquipoPage() {
 
       const { data: perfil } = await supabase
         .from('perfiles')
-        .select('empresa_id, rol')
+        .select('empresa_id, rol, plan_suscripcion') // <--- Pedimos el plan
         .eq('id', session.user.id)
         .single();
 
@@ -39,7 +49,12 @@ export default function EquipoPage() {
       }
 
       const idMaestro = perfil?.empresa_id || session.user.id;
+      const plan = perfil?.plan_suscripcion?.toLowerCase() || 'inicio';
+      
       setEmpresaId(idMaestro);
+      setPlanActual(plan);
+      setLimiteUsuarios(LIMITES_POR_PLAN[plan] || 1);
+      
       cargarEquipo(idMaestro);
     };
     inicializar();
@@ -98,7 +113,6 @@ export default function EquipoPage() {
     }
   };
 
-
   const guardarUsuario = async (e) => {
     e.preventDefault();
     setProcesando(true);
@@ -146,11 +160,13 @@ export default function EquipoPage() {
     setFormData({
       nombre_completo: user.nombre_completo || '',
       email: user.email || '',
-      rol: user.rol || 'miembro'
+      rol: user.rol || 'operaciones'
     });
     setEditandoId(user.id);
     setMostrarModal(true);
   };
+
+  const limiteAlcanzado = equipo.length >= limiteUsuarios;
 
   if (loading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={40} /></div>;
 
@@ -160,18 +176,31 @@ export default function EquipoPage() {
       <main className="flex-1 p-8 overflow-y-auto">
         <div className="max-w-7xl mx-auto">
           
-          <header className="mb-10 flex justify-between items-end">
+          <header className="mb-10 flex justify-between items-end border-b border-slate-800 pb-6">
             <div>
               <h1 className="text-3xl font-black tracking-tighter uppercase italic text-white leading-none flex items-center gap-3">
                  <Users className="text-blue-500" size={32} /> Gestión de <span className="text-blue-500">Equipo</span>
               </h1>
-              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2 ml-11">
-                Control de accesos y estatus operativo
+              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2 ml-11 flex items-center gap-2">
+                Plan Actual: <span className="text-orange-400 font-black">{planActual} ({equipo.length}/{limiteUsuarios} Usuarios)</span>
               </p>
             </div>
-            <button onClick={() => { setFormData(formInicial); setEditandoId(null); setMostrarModal(true); }} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg transition-all">
-              <UserPlus size={16} /> Nueva Credencial
-            </button>
+            
+            {/* LÓGICA DE BOTÓN BLOQUEADO POR PLAN */}
+            <div className="flex flex-col items-end gap-2">
+              {limiteAlcanzado && !editandoId ? (
+                <>
+                  <button disabled className="bg-slate-900 border border-slate-800 text-slate-600 px-6 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 cursor-not-allowed">
+                    <Lock size={16} /> Límite Alcanzado
+                  </button>
+                  <span className="text-orange-500 text-[9px] font-bold uppercase tracking-widest">Requiere Upgrade de Plan</span>
+                </>
+              ) : (
+                <button onClick={() => { setFormData(formInicial); setEditandoId(null); setMostrarModal(true); }} className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-2xl font-black uppercase text-[10px] flex items-center gap-2 shadow-lg transition-all">
+                  <UserPlus size={16} /> Nueva Credencial
+                </button>
+              )}
+            </div>
           </header>
 
           <div className="bg-slate-900 border border-slate-800 rounded-[2rem] overflow-hidden shadow-2xl">
@@ -190,13 +219,16 @@ export default function EquipoPage() {
                     <tr key={user.id} className={`hover:bg-slate-800/30 transition-colors group ${!user.activo ? 'opacity-50' : ''}`}>
                       <td className="p-4 pl-8 align-middle">
                         <div className="flex flex-col">
-                          <span className="text-white font-bold lowercase">{user.nombre_completo || 'Sin nombre'}</span>
+                          <span className="text-white font-bold uppercase text-[12px]">{user.nombre_completo || 'Sin nombre'}</span>
                           <span className="text-slate-500 text-[11px] font-mono lowercase">{user.email}</span>
                         </div>
                       </td>
                       <td className="p-4 align-middle">
-                        <span className={`inline-flex px-3 py-1 rounded-lg border uppercase tracking-widest text-[9px] font-black items-center gap-1 ${user.rol === 'administrador' ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 'bg-blue-500/10 border-blue-500/30 text-blue-400'}`}>
-                          {user.rol === 'administrador' ? <ShieldCheck size={12}/> : <UserIcon size={12}/>}
+                        <span className={`inline-flex px-3 py-1 rounded-lg border uppercase tracking-widest text-[9px] font-black items-center gap-1 
+                          ${user.rol === 'administrador' ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 
+                            user.rol === 'facturacion' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 
+                            'bg-blue-500/10 border-blue-500/30 text-blue-400'}`}>
+                          {user.rol === 'administrador' ? <ShieldCheck size={12}/> : user.rol === 'facturacion' ? <Receipt size={12}/> : <UserIcon size={12}/>}
                           {user.rol}
                         </span>
                       </td>
@@ -226,16 +258,15 @@ export default function EquipoPage() {
                           </button>
 
                           <div className="relative">
-                            <button onClick={() => toggleMenu(user.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button onClick={() => toggleMenu(user.id)} className="p-2 bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors focus:outline-none">
                               <MoreVertical size={14} />
                             </button>
                             
-{menuAbiertoId === user.id && (
+                            {menuAbiertoId === user.id && (
                               <div className="absolute right-0 mt-2 w-48 bg-slate-800 rounded-xl shadow-2xl z-50 border border-slate-700 overflow-hidden">
                                 <button onClick={() => reenviarInvitacion(user)} className="flex items-center gap-3 w-full text-left px-4 py-3 text-[11px] font-bold uppercase tracking-widest text-slate-300 hover:bg-slate-700 transition-colors">
                                   <Send size={14}/> Reenviar Link
                                 </button>
-                                {/* El botón de eliminar fue extirpado de aquí */}
                               </div>
                             )}
                           </div>
@@ -268,16 +299,17 @@ export default function EquipoPage() {
 
                   <div>
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Correo (Usuario)</label>
-                    <input required type="email" className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white focus:border-blue-500 outline-none lowercase" 
+                    <input required type="email" disabled={!!editandoId} className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white focus:border-blue-500 outline-none lowercase disabled:opacity-50" 
                       value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} placeholder="ejemplo@maccgg.com" />
                   </div>
 
                   <div>
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 block ml-1">Nivel de Acceso</label>
-                    <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white font-bold uppercase"
+                    <select className="w-full bg-slate-950 border border-slate-800 p-4 rounded-2xl text-sm text-white font-bold uppercase focus:border-blue-500 outline-none"
                       value={formData.rol} onChange={e => setFormData({...formData, rol: e.target.value})}>
-                      <option value="miembro">Miembro (Operación)</option>
-                      <option value="administrador">Administrador</option>
+                      <option value="operaciones">Operaciones (Logística)</option>
+                      <option value="facturacion">Facturación y Cobranza</option>
+                      <option value="administrador">Administrador Total</option>
                     </select>
                   </div>
 

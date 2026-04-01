@@ -169,7 +169,21 @@ const { data: viajesBD, error: errorViajes } = await supabase
     obtenerDatos(empresaId);
   };
 
-  if (!sesion) return <div className="min-h-screen bg-slate-950"></div>;
+  if (!sesion) return 
+  
+if (rolUsuario === 'facturacion') {
+    return (
+      <div className="flex bg-slate-950 min-h-screen text-slate-200 w-full">
+        <Sidebar />
+        <main className="flex-1 p-8 flex flex-col items-center justify-center">
+          <h2 className="text-2xl text-white font-black uppercase tracking-widest">Acceso Restringido</h2>
+          <p className="text-slate-500 text-sm mt-2">Tu perfil de Facturación no tiene acceso a Logística Operativa.</p>
+        </main>
+      </div>
+    );
+  }
+
+  <div className="min-h-screen bg-slate-950"></div>;
 
   return (
     <div className="flex bg-slate-950 min-h-screen text-slate-200 w-full">
