@@ -20,6 +20,7 @@ const TABS_CONFIG = [
 export default function HistorialPage() {
   const router = useRouter();
   const [sesion, setSesion] = useState(null);
+  const [empresaId, setEmpresaId] = useState(null); // <-- NUEVO: Estado para el ID Maestro
   const [loading, setLoading] = useState(true);
   const [loadingTabla, setLoadingTabla] = useState(false);
   const [accesoAutorizado, setAccesoAutorizado] = useState(false);
@@ -36,24 +37,31 @@ export default function HistorialPage() {
 
       const { data: perfil } = await supabase
         .from('perfiles')
-        .select('rol')
+        .select('rol, empresa_id') // <-- NUEVO: Pedimos la empresa_id
         .eq('id', session.user.id)
         .single();
 
       if (perfil?.rol !== 'administrador') return router.push('/');
 
+      // Definimos el ID Maestro (Si no tiene empresa_id, él mismo es la empresa)
+      const idMaestro = perfil?.empresa_id || session.user.id;
+      setEmpresaId(idMaestro);
+
       setAccesoAutorizado(true);
-      cargarHistorial('todos'); 
+      cargarHistorial('todos', idMaestro); // <-- Pasamos el ID directamente en la primera carga
     };
     verificarAcceso();
   }, [router]);
 
-  async function cargarHistorial(tabId) {
+  async function cargarHistorial(tabId, currentEmpresaId = empresaId) {
+    if (!currentEmpresaId) return; // Evitar consultas huérfanas
+    
     setLoadingTabla(true);
     try {
       let query = supabase
         .from('historial_movimientos')
         .select(`*, perfiles (rol, empresa_id, nombre_completo, email)`)
+        .eq('empresa_id', currentEmpresaId) // <=== EL BLINDAJE DE AISLAMIENTO B2B
         .order('fecha', { ascending: false })
         .limit(150); 
 
@@ -75,12 +83,12 @@ export default function HistorialPage() {
 
   const handleTabChange = (tabId) => {
     setActiveTab(tabId);
-    cargarHistorial(tabId);
+    cargarHistorial(tabId, empresaId);
   };
 
   const procesarDiferencias = (oldData, newData, accion) => {
     const cambios = [];
-    const camposIgnorados = ['id', 'created_at', 'updated_at', 'usuario_id'];
+    const camposIgnorados = ['id', 'created_at', 'updated_at', 'usuario_id', 'empresa_id'];
 
     if (accion === 'INSERT') {
       for (const [key, val] of Object.entries(newData || {})) {
