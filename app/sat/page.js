@@ -4,9 +4,10 @@ import { supabase } from '@/lib/supabaseClient';
 import { 
   User, ShieldCheck, MapPin, PlusCircle, 
   Trash2, Edit2, X, Save, Building2, Package, Truck, Users,
-  Lock, FileKey, AlertTriangle, CheckCircle, Image as ImageIcon, FileText, UploadCloud
+  Lock, FileKey, AlertTriangle, CheckCircle, Image as ImageIcon, FileText, UploadCloud, Loader2,
 } from 'lucide-react';
 import Sidebar from '@/components/sidebar';
+import * as XLSX from 'xlsx';
 
 // Función para extraer el número de serie de un archivo .cer del SAT
 const extraerSerieCER = async (archivoCer) => {
@@ -77,6 +78,103 @@ export default function SATConfigPage() {
   });
 
   const [editandoId, setEditandoId] = useState(null);
+
+// === INICIO DE LÓGICA DE IMPORTACIÓN MASIVA (EXCEL MULTI-TAB) ===
+  const [importingInfo, setImportingInfo] = useState(false);
+
+  // Genera un Excel real (.xlsx) con todas las pestañas necesarias
+  const descargarPlantillaMaestra = () => {
+    const wb = XLSX.utils.book_new();
+
+    // Definición de todas las estructuras de la Institución
+    const estructuras = {
+      'operadores': ['nombre_completo', 'rfc', 'numero_licencia', 'vencimiento_licencia', 'telefono'],
+      'remolques': ['numero_economico', 'placas', 'tipo_placa', 'subtipo_remolque'],
+      'clientes': ['nombre', 'rfc', 'regimen_fiscal', 'codigo_postal', 'dias_credito', 'uso_cfdi', 'calle_numero', 'colonia', 'municipio', 'estado'],
+      'ubicaciones': ['nombre_lugar', 'rfc_ubicacion', 'codigo_postal', 'estado', 'municipio', 'calle_numero', 'colonia'],
+      'mercancias': ['descripcion', 'clave_sat', 'clave_unidad', 'peso_unitario_kg', 'clave_embalaje', 'material_peligroso']
+    };
+
+    // Crear una pestaña por cada módulo
+    for (const [nombreHoja, headers] of Object.entries(estructuras)) {
+      const ws = XLSX.utils.aoa_to_sheet([headers]);
+      XLSX.utils.book_append_sheet(wb, ws, nombreHoja);
+    }
+
+    // Descargar el archivo maestro
+    XLSX.writeFile(wb, 'Plantilla_FleetForce_General.xlsx');
+  };
+
+  const handleFileUploadExcel = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.xlsx')) {
+      alert("🛑 Formato incorrecto. Por favor sube un archivo de Excel (.xlsx)");
+      e.target.value = null;
+      return;
+    }
+
+    setImportingInfo(true);
+    const reader = new FileReader();
+    
+    reader.onload = async (evento) => {
+      try {
+        const data = new Uint8Array(evento.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+
+        // Validamos que el Excel contenga la pestaña del módulo actual
+        if (!workbook.SheetNames.includes(activeTab)) {
+          throw new Error(`No se encontró la pestaña llamada '${activeTab}' en este Excel.`);
+        }
+
+        const worksheet = workbook.Sheets[activeTab];
+        const registros = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+        if (registros.length === 0) throw new Error(`La pestaña '${activeTab}' está vacía.`);
+
+        // Inyectamos ADN Institucional y estandarizamos datos críticos
+        const payloadMasivo = registros.map(reg => {
+          // Normalizamos las claves para evitar errores si el usuario puso espacios en los títulos de las columnas
+          let limpio = { usuario_id: empresaId, activo: true };
+          for (const key in reg) {
+            limpio[key.trim()] = String(reg[key]).trim(); 
+          }
+
+          if (activeTab === 'operadores' && limpio.rfc) limpio.rfc = limpio.rfc.toUpperCase();
+          if (activeTab === 'clientes' && limpio.rfc) limpio.rfc = limpio.rfc.toUpperCase();
+          if (activeTab === 'remolques' && limpio.placas) limpio.placas = limpio.placas.toUpperCase();
+          if (activeTab === 'ubicaciones' && limpio.rfc_ubicacion) limpio.rfc_ubicacion = limpio.rfc_ubicacion.toUpperCase();
+          if (activeTab === 'mercancias' && limpio.material_peligroso) {
+            const matPel = String(limpio.material_peligroso).toLowerCase();
+            limpio.material_peligroso = (matPel === 'true' || matPel === '1' || matPel === 'sí' || matPel === 'si');
+          }
+          return limpio;
+        });
+
+        const { error } = await supabase.from(activeTab).insert(payloadMasivo);
+        if (error) throw error;
+
+        alert(`✅ Carga Operativa Exitosa: ${payloadMasivo.length} registros añadidos a ${activeTab}.`);
+        cargarDatos(sesion.user.id);
+
+      } catch (err) {
+        console.error(err);
+        alert(`❌ Error en importación: ${err.message}\nAsegúrate de usar la plantilla de FleetForce.`);
+      } finally {
+        setImportingInfo(false);
+        e.target.value = null; 
+      }
+    };
+    
+    reader.onerror = () => {
+      alert("❌ Fallo en la lectura del archivo.");
+      setImportingInfo(false);
+      e.target.value = null;
+    };
+
+    reader.readAsArrayBuffer(file); // Leemos como binario para que la librería XLSX funcione
+  };
+  // === FIN DE LÓGICA DE IMPORTACIÓN MASIVA (EXCEL MULTI-TAB) ===
 
   const tituloSingular = { operadores: 'Operador', remolques: 'Remolque', ubicaciones: 'Ubicación', mercancias: 'Mercancía', clientes: 'Cliente' };
 
@@ -294,12 +392,29 @@ const eliminarRegistro = async (id) => {
 
           {activeTab !== 'fiscal' ? (
             <div className="animate-in fade-in duration-500">
-              <div className="flex justify-between items-center mb-8 px-2">
-                <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Gestión de {activeTab}</h3>
-                <button onClick={() => setMostrarModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20">
-                  <PlusCircle size={14} /> Registrar {tituloSingular[activeTab]}
-                </button>
-              </div>
+
+<div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8 px-2">
+    <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Gestión de {activeTab}</h3>
+    
+<div className="flex items-center gap-3">
+      {/* Botones Estratégicos de Excel */}
+      <button onClick={descargarPlantillaMaestra} className="text-slate-500 hover:text-emerald-400 font-black uppercase text-[9px] tracking-widest transition-colors flex items-center gap-1" title="Descargar plantilla general con todas las pestañas">
+        <FileText size={14}/> Plantilla general (.xlsx)
+      </button>
+      
+      <label className={`cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 transition-all border border-slate-700 ${importingInfo ? 'opacity-50 pointer-events-none' : ''}`}>
+        {importingInfo ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />}
+        {importingInfo ? 'Procesando...' : 'Subir Excel'}
+        {/* Cambiamos el accept a .xlsx */}
+        <input type="file" accept=".xlsx" className="hidden" onChange={handleFileUploadExcel} disabled={importingInfo} />
+      </label>
+
+      {/* Botón de Registro Manual Original */}
+      <button onClick={() => setMostrarModal(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20">
+        <PlusCircle size={14} /> Registrar {tituloSingular[activeTab]}
+      </button>
+    </div>
+  </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 
